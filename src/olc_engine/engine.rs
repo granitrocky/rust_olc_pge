@@ -2635,11 +2635,15 @@ impl GLLoader {
 
     pub fn get_function_pointer(func_name: &str) -> *const u64 {
         unsafe {
-            let mut glp = wglGetProcAddress(CString::new(func_name).expect("Failed to get OpenGL function").as_ptr());
+            let (s_func, s_ogl) = (CString::new(func_name).expect(
+                                           "Failed to get OpenGL function"),
+                                   CString::new("opengl32.dll").expect(
+                                       "Failed loadOpenGL DLL"));
+            let mut glp = wglGetProcAddress(s_func.as_ptr());
 
             if glp as *const u64 as u64 == 0 {
-                let module: HMODULE = LoadLibraryA(CString::new("opengl32.dll").expect("Failed load OpenGL DLL").as_ptr());
-                glp = GetProcAddress(module, CString::new(func_name).expect("Failed to get OpenGL function").as_ptr());
+                let module: HMODULE = LoadLibraryA(s_ogl.as_ptr());
+                glp = GetProcAddress(module, s_func.as_ptr());
             }
             if glp as *const u64 as u64 == 0 {
                 println!("FAILED TO LOAD OPENGL FUNCTION: {}", func_name);

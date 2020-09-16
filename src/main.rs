@@ -40,17 +40,14 @@ impl Olc for MyGame{
             self.selected = None;
             let mut i = 0;
             for i in 0..self.points.len(){
-                if (mouse_pos() - self.points[i]).mag() < 5.0{
+                if (mouse_pos() - self.points[i]).mag() < 10.0{
                     self.selected = Some(i as i32);
                 }
             }
         }
 
-        match self.selected{
-            Some(point) => {
-                self.points[point as usize] = mouse_pos();
-            }
-            _ => {}
+        if let Some(point) = self.selected {
+            self.points[point as usize] = mouse_pos();
         }
 
         draw_warped_decal(&self.bmp, self.points.to_vec());
@@ -60,7 +57,7 @@ impl Olc for MyGame{
         }
 
         for i in 0..self.points.len(){
-            fill_circle(self.points[i], 5, Pixel::YELLOW);
+            fill_circle(self.points[i], 10, Pixel::YELLOW);
         }
 
         if get_key(Key::ESCAPE).pressed{
