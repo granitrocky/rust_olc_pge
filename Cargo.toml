@@ -1,0 +1,19 @@
+[package]
+name = "olc_3d_engine"
+version = "0.1.0"
+authors = ["Jonny Kenyon <granitrocky@gmail.com>"]
+edition = "2018"
+[profile.dev]
+opt-level = 0
+
+[profile.test]
+opt-level = 2
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3.9", features = ["winuser", "windef","minwindef","dwmapi", "libloaderapi", "ntdef", "wingdi"] }
+widestring = "0.4.2"
+pretty-hex ="0.2.0"
+lazy_static = "*"
+bmp = "0.5.0"
+rand = "*"
