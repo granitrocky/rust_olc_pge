@@ -1,5 +1,5 @@
 [package]
-name = "olc_3d_engine"
+name = "rust_olc_pge"
 version = "0.1.0"
 authors = ["Jonny Kenyon <granitrocky@gmail.com>"]
 edition = "2018"
