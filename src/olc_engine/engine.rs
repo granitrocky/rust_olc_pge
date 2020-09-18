@@ -280,7 +280,7 @@ impl Renderer {
         //I'm wrapping this whole thing in unsafe because
         // it accesses Union values
         unsafe {
-            if let None = decal.decal {
+            if decal.decal.is_none() {
                 (GL.glBindTexture)(GL_TEXTURE_2D, 0);
 
                 (GL.glBegin)(GL_QUADS);
@@ -364,8 +364,9 @@ struct PlatformData {
     mouse_position: Option<Vf2d>,
     view_position: Option<Vi2d>,
     window_size: Option<Vi2d>,
+    resolution: Option<Vi2d>,
     screen_size: Option<Vi2d>,
-    pixel_size: Option<Vi2d>,
+    pixel_size: Option<Vf2d>,
     mouse_position_cache: Option<Vf2d>,
     window_alive: bool,
     full_screen: bool,
@@ -391,6 +392,7 @@ impl PlatformData {
             view_position: None,
             window_size: None,
             pixel_size: None,
+            resolution: None,
             screen_size: None,
             mouse_position_cache: None,
             window_alive: true,
@@ -410,8 +412,9 @@ impl PlatformData {
         self.mouse_position = Some(Vf2d::new(0.0, 0.0));
         self.view_position = Some(Vi2d::new(0, 0));
         self.window_size = Some(Vi2d::new(0, 0));
+        self.resolution = Some(Vi2d::new(0, 0));
         self.screen_size = Some(Vi2d::new(0, 0));
-        self.pixel_size = Some(Vi2d::new(0, 0));
+        self.pixel_size = Some(Vf2d::new(0.0, 0.0));
         self.mouse_position_cache = Some(Vf2d::new(0.0, 0.0));
     }
 
@@ -433,8 +436,10 @@ impl PlatformData {
         }
         if temp_mouse.x < 0.0 { temp_mouse.x = 0.0 }
         if temp_mouse.y < 0.0 { temp_mouse.y = 0.0 }
-        temp_mouse.x = temp_mouse.x / self.pixel_size.unwrap_or_default().x as f32;
-        temp_mouse.y = temp_mouse.y / self.pixel_size.unwrap_or_default().y as f32;
+
+        let px = self.pixel_size.unwrap_or_default();
+        let tmp = Vf2d::new(px.x as f32, px.y as f32);
+        temp_mouse /= tmp;
         self.mouse_position_cache = Some(temp_mouse);
     }
     fn update_window_size(&mut self, width: u32, height: u32) {
@@ -571,7 +576,7 @@ impl Platform for PlatformWindows {
                 lpfnWndProc: Some(PlatformWindows::handle_window_event),
                 cbClsExtra: 0,
                 cbWndExtra: 0,
-                lpszMenuName: 0 as *const u16,
+                lpszMenuName: std::ptr::null::<u16>(),
                 hbrBackground: COLOR_WINDOW as HBRUSH,
                 lpszClassName: class_string.as_ptr() as *const u16,
                 hIconSm: LoadIconW(NULL as HINSTANCE, IDC_ARROW),
@@ -582,39 +587,46 @@ impl Platform for PlatformWindows {
             let mut dwStyle: DWORD = WS_CAPTION | WS_SYSMENU | WS_VISIBLE;
             let mut top_left = window_pos;
             if full_screen {
+                let mut p: POINT = POINT{x: 0, y: 0};
+                GetCursorPos(&mut p);
                 dwExStyle = 0;
                 dwStyle = WS_VISIBLE | WS_POPUP;
-                let hmon = MonitorFromWindow(self.hwnd,
-                                             MONITOR_DEFAULTTOPRIMARY);
+                let hmon = MonitorFromPoint(p, MONITOR_DEFAULTTOPRIMARY);
+                    //MonitorFromWindow(self.hwnd,MONITOR_DEFAULTTONEAREST);
 
-                let mut mi: MONITORINFO = std::mem::uninitialized();
+                let mut mi = std::mem::MaybeUninit::<MONITORINFO>::zeroed().assume_init();
+                mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
                 GetMonitorInfoW(hmon, &mut mi);
 
                 window_size = Vi2d::new(mi.rcMonitor.right,
                                         mi.rcMonitor.bottom);
+                println!("X: {}, Y: {}, W: {}, H: {}", mi.rcMonitor.left,
+                         mi.rcMonitor.top, mi.rcMonitor.right, mi.rcMonitor.bottom);
                 top_left.x = 0;
                 top_left.y = 0;
             }
-            let left = window_size.x;
+            let right = window_size.x;
             let bottom = window_size.y;
             let mut wnd_rect = RECT {
                 left: 0,
                 top: 0,
-                right: left,
+                right,
                 bottom,
             };
 
+            PLATFORM_DATA.window_size = Some(window_size);
+
             AdjustWindowRectEx(&mut wnd_rect, dwStyle, 0, dwExStyle);
-            let width = &wnd_rect.right - &wnd_rect.left;
-            let height = &wnd_rect.bottom - &wnd_rect.top;
+            let width = wnd_rect.right - wnd_rect.left;
+            let height = wnd_rect.bottom - wnd_rect.top;
             let try_create = || -> HWND{
                 CreateWindowExW(dwExStyle,
                                 class_string.as_ptr() as *const u16,
                                 class_string.as_ptr() as *const u16,
                                 dwStyle, top_left.x, top_left.y,
                                 width, height,
-                                0 as *mut HWND__,
-                                0 as *mut HMENU__,
+                                std::ptr::null_mut::<HWND__>(),
+                                std::ptr::null_mut::<HMENU__>(),
                                 GetModuleHandleW(0 as LPCWSTR),
                                 NULL)
             };
@@ -622,12 +634,7 @@ impl Platform for PlatformWindows {
             PLATFORM_DATA.window_size = Some(window_size);
             self.hwnd = try_create();
             let test_create = |hwnd: HWND| -> bool{
-                let pid = hwnd as *const HWND as u64;
-                if pid == 0 {
-                    false
-                } else {
-                    true
-                }
+                !(hwnd.is_null())
             };
             tries += 1;
             while tries < 5 && !test_create(self.hwnd) {
@@ -655,11 +662,11 @@ impl Platform for PlatformWindows {
     fn start_system_event_loop(&self) -> Rcode {
         unsafe {
             //We have to initialize the data first so that Rust feels comfortable
-            let mut lpMsg: MSG = std::mem::uninitialized();
+            let mut lpMsg = std::mem::MaybeUninit::<MSG>::zeroed().assume_init();
             loop {
                 if GetMessageW(&mut lpMsg, NULL as HWND, 0, 0) > 0 {
-                    TranslateMessage(&mut lpMsg);
-                    DispatchMessageW(&mut lpMsg);
+                    TranslateMessage(&lpMsg);
+                    DispatchMessageW(&lpMsg);
                 } else {
                     return Rcode::Fail;
                 }
@@ -697,7 +704,7 @@ pub struct OLCEngine {
 
 impl OLCEngine {
     pub fn empty() -> Self {
-        let mut engine = OLCEngine {
+        OLCEngine {
             app_name: String::from(""),
             is_focused: true,
             window_width: 0,
@@ -715,8 +722,7 @@ impl OLCEngine {
             draw_target: 0,
             mouse_position: Vi2d::from((0, 0)),
             font_decal: Decal::new(),
-        };
-        engine
+        }
     }
     pub fn init(app_name: &str,
                screen_width: u32,
@@ -975,7 +981,7 @@ pub fn draw_line_xy(mut x1: i32, mut y1: i32,
                 px = px + 2 * dy1;
             } else {
                 if (dx < 0 && dy < 0) || (dx > 0 && dy > 0) {
-                    y = y + 1;
+                    y += 1;
                 } else {
                     y = y - 1;
                 }
@@ -1172,10 +1178,8 @@ fn construct_font_sheet() -> Decal {
     let mut py = 0;
     let mut px = 0;
     let mut data_chars: [u8; 1024] = [0; 1024];
-    let mut i = 0;
-    for c in data.chars() {
+    for (i, c) in data.chars().enumerate() {
         data_chars[i] = c as u8;
-        i += 1;
     }
     for b in (0..1024).step_by(4) {
         let sym1: u32 = (data_chars[b + 0] as u32) - 48;
@@ -1513,12 +1517,17 @@ pub trait App: Olc {
         //Set the olc object to be used in this crate
         unsafe {
             PLATFORM_DATA.init();
-            PLATFORM_DATA.window_size = Some(
-                Vi2d::from((screen_width as i32, screen_height as i32)));
+            PLATFORM_DATA.resolution = Some(
+                Vi2d::from(((screen_width / pixel_width) as i32,
+                            (screen_height / pixel_height) as i32)));
+            if !full_screen{
+                PLATFORM_DATA.window_size = Some(
+                    Vi2d::from((screen_width as i32, screen_height as i32)));
+            }
             PLATFORM_DATA.full_screen = full_screen;
             PLATFORM_DATA.title = app_name;
-            PLATFORM_DATA.pixel_size = Some(Vi2d::new(pixel_width as i32,
-                                                      pixel_height as i32));
+            PLATFORM_DATA.pixel_size = Some(Vf2d::new(pixel_width as f32,
+                                                      pixel_height as f32));
         };
         OLCEngine::init(
             app_name,
@@ -1564,14 +1573,18 @@ pub trait App: Olc {
 
         //PrepareEngine
         let mut renderer = Renderer::new();
-        renderer.create_graphics(local_pge_lock.full_screen,
-                                 local_pge_lock.vsync,
-                                 Vi2d { x: 0, y: 0 },
-                                 Vi2d {
-                                     x: local_pge_lock.window_width as i32,
-                                     y: local_pge_lock.window_height as i32
-                                 });
-
+        unsafe {
+            renderer.create_graphics(local_pge_lock.full_screen,
+                                     local_pge_lock.vsync,
+                                     Vi2d { x: 0, y: 0 },
+                                     PLATFORM_DATA.window_size.unwrap_or_default());
+            if PLATFORM_DATA.full_screen{
+                let fwin = PLATFORM_DATA.window_size.unwrap_or_default().to_vf2d();
+                let fres = PLATFORM_DATA.resolution.unwrap_or_default().to_vf2d();
+                PLATFORM_DATA.pixel_size = Some(fwin / fres);
+                println!("{}", PLATFORM_DATA.pixel_size.unwrap_or_default());
+            }
+        }
         //Create Primary Layer "0"
         let base_layer_id = add_layer();
         set_draw_target(base_layer_id);
@@ -1652,7 +1665,7 @@ pub trait App: Olc {
 
             for layer in layer_iter {
                 if layer.shown {
-                    if let None = layer.func_hook {
+                    if layer.func_hook.is_none() {
                         Renderer::apply_texture(layer.id);
                         if layer.update {
                             Renderer::update_texture(layer.id,
@@ -1682,8 +1695,7 @@ pub trait App: Olc {
             if frame_timer >= 1.0 {
                 last_fps = frame_count;
                 frame_timer -= 1.0;
-                let sTitle = String::from(
-                    local_pge_lock.app_name.to_string() + " - FPS: " + &*frame_count.to_string());
+                let sTitle = local_pge_lock.app_name.to_string() + " - FPS: " + &*frame_count.to_string();
                 unsafe { game_platform.set_window_title(sTitle) };
                 frame_count = 0;
             }
@@ -1723,6 +1735,10 @@ impl Vi2d {
 
     /// Returns cross product of two vectors.
     pub fn cross(&self, rhs: Vi2d) -> i32 { self.x * rhs.y - self.y * rhs.x }
+
+    pub fn to_vf2d(&self) -> Vf2d{
+        Vf2d::new(self.x as f32, self.y as f32)
+    }
 }
 
 impl Vf2d {
@@ -1746,6 +1762,10 @@ impl Vf2d {
 
     /// Returns cross product of two vectors.
     pub fn cross(&self, rhs: Vf2d) -> f32 { self.x * rhs.y - self.y * rhs.x }
+
+    pub fn to_vi2d(&self) -> Vi2d{
+        Vi2d::new(self.x as i32, self.y as i32)
+    }
 }
 
 impl<T> From<(T, T)> for V2d<T> {
@@ -2340,7 +2360,7 @@ impl Decal {
     }
 
     pub fn create(spr: Option<Sprite>) -> Self {
-        if let None = spr {
+        if spr.is_none() {
             Decal::new()
         } else {
             let sprite = spr.unwrap();
@@ -2351,10 +2371,9 @@ impl Decal {
                 uv_scale: Vf2d::from((1.0, 1.0)),
             };
             Decal::update(&mut small);
-            let mut decal = Self {
+            Self{
                 d_inst: Arc::new(small),
-            };
-            decal
+            }
         }
     }
 
@@ -2545,7 +2564,7 @@ pub fn check_gl_error(i: i32) {
         errs.push(a);
         a = (GL.glGetError)();
     }
-    if errs.len() != 0 {
+    if !errs.is_empty() {
         println!("Errors: {:?}, Position: {} ",
                  errs, i)
     }
@@ -2641,11 +2660,11 @@ impl GLLoader {
                                        "Failed loadOpenGL DLL"));
             let mut glp = wglGetProcAddress(s_func.as_ptr());
 
-            if glp as *const u64 as u64 == 0 {
+            if glp.is_null() {
                 let module: HMODULE = LoadLibraryA(s_ogl.as_ptr());
                 glp = GetProcAddress(module, s_func.as_ptr());
             }
-            if glp as *const u64 as u64 == 0 {
+            if glp.is_null() {
                 println!("FAILED TO LOAD OPENGL FUNCTION: {}", func_name);
             }
             glp as *const u64

@@ -27,14 +27,14 @@ impl Olc for MyGame{
         ));
         self.bmp = decal;
         self.points[3] = Vf2d::new(10.0, 10.0);
-        self.points[0] = Vf2d::new(470.0, 10.0);
-        self.points[1] = Vf2d::new(470.0, 470.0);
-        self.points[2] = Vf2d::new(10.0, 470.0);
+        self.points[0] = Vf2d::new(320.0, 10.0);
+        self.points[1] = Vf2d::new(320.0, 320.0);
+        self.points[2] = Vf2d::new(10.0, 320.0);
         true
     }
 
     fn on_engine_update(&mut self, elapsed_time: f32)  -> bool {
-        clear(Pixel::VERY_DARK_BLUE);
+        //clear(Pixel::VERY_DARK_BLUE);
 
         if get_mouse(0).pressed {
             self.selected = None;
