@@ -3,8 +3,8 @@
 #![allow(unused)]
 #![feature(once_cell)]
 
-mod olc_engine;
-use olc_engine::engine::*;
+mod olc;
+use olc::*;
 use rand::prelude::ThreadRng;
 use std::rc::Rc;
 
@@ -33,34 +33,34 @@ impl Olc for MyGame{
         true
     }
 
-    fn on_engine_update(&mut self, elapsed_time: f32)  -> bool {
-        //clear(Pixel::VERY_DARK_BLUE);
+    fn on_engine_update(&mut self, engine: &mut OLCEngine, elapsed_time: f32)  -> bool {
+        engine.clear(Pixel::VERY_DARK_BLUE);
 
-        if get_mouse(0).pressed {
+        if engine.get_mouse(0).pressed {
             self.selected = None;
             let mut i = 0;
             for i in 0..self.points.len(){
-                if (mouse_pos() - self.points[i]).mag() < 10.0{
+                if (engine.mouse_pos() - self.points[i]).mag() < 10.0{
                     self.selected = Some(i as i32);
                 }
             }
         }
 
         if let Some(point) = self.selected {
-            self.points[point as usize] = mouse_pos();
+            self.points[point as usize] = engine.mouse_pos();
         }
 
-        draw_warped_decal(&self.bmp, self.points.to_vec());
+        engine.draw_warped_decal(self.bmp.get(), &self.points);
 
-        if get_mouse(0).released{
+        if engine.get_mouse(0).released{
             self.selected = None;
         }
 
         for i in 0..self.points.len(){
-            fill_circle(self.points[i], 10, Pixel::YELLOW);
+            engine.fill_circle(self.points[i], 10, Pixel::YELLOW);
         }
 
-        if get_key(Key::ESCAPE).pressed{
+        if engine.get_key(Key::ESCAPE).pressed{
             return false;
         }
 
@@ -80,9 +80,10 @@ fn main() {
         points: [Vf2d::new(0.0,0.0); 4],
         selected: None,
     };
-    if a.construct("Test Game", 800, 600,
-                   1, 1, false, false)
+    match a.construct("Test Game", 800, 600,
+                      1, 1, false, false)
     {
-        a.start();
+        Ok(engine) => { a.start(engine); }
+        _ => panic!("Couldn't start the engine")
     }
 }

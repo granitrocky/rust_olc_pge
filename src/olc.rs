@@ -2,7 +2,6 @@
 #![allow(non_snake_case)]
 #![feature(once_cell)]
 //#![feature(nll)]
-
 #[cfg(windows)]
 extern crate winapi;
 
@@ -11,9 +10,9 @@ use self::winapi::um::winuser::*;
 #[cfg(windows)]
 use self::winapi::shared::windef::HWND;
 
-
+mod gl_const;
+use gl_const::*;
 use core::{ops, fmt};
-use super::gl_const::*;
 use std::fmt::Error;
 use std::rc::Rc;
 use self::winapi::shared::minwindef::{HINSTANCE__, WPARAM, LPARAM, LRESULT, DWORD, HINSTANCE, HMODULE};
@@ -74,9 +73,8 @@ impl<T> DerefMut for PGEBox<T>{
 
 lazy_static! {
     static ref GL: GLLoader = GLLoader::construct();
-    static ref FONT_DECAL: Decal = construct_font_sheet();
 }
-static mut PGE: OnceCell<OLCEngine> = OnceCell::new();
+//static mut PGE: OnceCell<OLCEngine> = OnceCell::new();
 
 
 pub enum Rcode {
@@ -238,8 +236,8 @@ impl Renderer {
         id
     }
 
-    pub fn delete_texture(id: &mut u32) -> &mut u32 {
-        (GL.glDeleteTextures)(1, id);
+    pub fn delete_texture(mut id: &mut u32) -> &mut u32 {
+        (GL.glDeleteTextures)(1, &mut id);
         id
     }
 
@@ -249,7 +247,7 @@ impl Renderer {
 
     pub fn update_texture(_id: u32, spr: &Sprite) {
         let mut sprite_pointer = spr.col_data.as_ptr() as *const usize;
-        (GL.glTexImage2D)(GL_TEXTURE_2D, 0, GL_RGBA8, spr.width, spr.height, 0, GL_BGRA_EXT,
+        (GL.glTexImage2D)(GL_TEXTURE_2D, 0, GL_RGBA8, spr.width, spr.height, 0, GL_RGBA,
                           GL_UNSIGNED_BYTE, sprite_pointer);
     }
     pub fn draw_layer_quad(offset: Vf2d, scale: Vf2d, tint: Pixel) {
@@ -724,781 +722,765 @@ impl OLCEngine {
             font_decal: Decal::new(),
         }
     }
-    pub fn init(app_name: &str,
-               screen_width: u32,
-               screen_height: u32,
-               pixel_width: u32,
-               pixel_height: u32,
-               full_screen: bool,
-               vsync: bool){
+    pub fn init(&mut self,
+                app_name: &str,
+                screen_width: u32,
+                screen_height: u32,
+                pixel_width: u32,
+                pixel_height: u32,
+                full_screen: bool,
+                vsync: bool) {
         let tex_size_w = screen_width / pixel_width;
         let tex_size_h = screen_height / pixel_height;
         let inv_screen_size = Vf2d::from((
             (1.0 / tex_size_w as f32),
             (1.0 / tex_size_h as f32)
         ));
+
+        self.app_name = String::from(app_name);
+        self.is_focused = true;
+        self.window_width = screen_width;
+        self.window_height =  screen_height;
+        self.pixels_w = tex_size_w;
+        self.pixels_h = tex_size_h;
+        self.pixel_width = pixel_width;
+        self.pixel_height = pixel_height;
+        self.inv_screen_size = inv_screen_size;
+        self.fps = 0;
+        self.full_screen = full_screen;
+        self.vsync = vsync;
+        self.layers = vec![];
+        self.game_timer = std::time::SystemTime::now();
+        self.draw_target = 0;
+        self.mouse_position = Vi2d::new(0, 0);
+        self.font_decal = Decal::new();
+    }
+
+
+    pub fn is_focused(&self) -> bool {
+        unsafe { PLATFORM_DATA.key_focus }
+    }
+
+    pub fn get_key(&self, k: Key) -> HWButton {
         unsafe {
-            let mut engine = PGE.get_or_init(|| {
-                OLCEngine {
-                    app_name: String::from(app_name),
-                    is_focused: true,
-                    window_width: screen_width,
-                    window_height: screen_height,
-                    pixels_w: tex_size_w,
-                    pixels_h: tex_size_h,
-                    pixel_width: pixel_width,
-                    pixel_height: pixel_height,
-                    inv_screen_size: inv_screen_size,
-                    fps: 0,
-                    full_screen: full_screen,
-                    vsync: vsync,
-                    layers: vec![],
-                    game_timer: std::time::SystemTime::now(),
-                    draw_target: 0,
-                    mouse_position: Vi2d::new(0, 0),
-                    font_decal: Decal::new(),
-                }
-            });
+            PLATFORM_DATA.key_map.as_mut().unwrap()[Keys::map_keys(k) as usize]
         }
     }
-}
 
-pub fn is_focused() -> bool {
-    unsafe { PLATFORM_DATA.key_focus }
-}
-
-pub fn get_key(k: Key) -> HWButton {
-    unsafe {
-        PLATFORM_DATA.key_map.as_mut().unwrap()[Keys::map_keys(k) as usize]
+    pub fn set_key(&self, i: usize, k: HWButton) {
+        unsafe {
+            PLATFORM_DATA.key_map.as_mut().unwrap()[i] = k
+        }
     }
-}
 
-pub fn set_key(i: usize, k: HWButton) {
-    unsafe {
-        PLATFORM_DATA.key_map.as_mut().unwrap()[i] = k
+    pub fn get_mouse(&self, b: i32) -> HWButton {
+        unsafe {
+            PLATFORM_DATA.mouse_map.as_ref().unwrap()[b as usize]
+        }
     }
-}
-
-pub fn get_mouse(b: i32) -> HWButton {
-    unsafe {
-        PLATFORM_DATA.mouse_map.as_ref().unwrap()[b as usize]
+    pub fn set_mouse(&self, i: usize, k: HWButton) {
+        unsafe {
+            PLATFORM_DATA.mouse_map.as_mut().unwrap()[i] = k
+        }
     }
-}
-pub fn set_mouse(i: usize, k: HWButton) {
-    unsafe {
-        PLATFORM_DATA.mouse_map.as_mut().unwrap()[i] = k
+
+    pub fn mouse_x(&self) -> f32 {
+        unsafe { PLATFORM_DATA.mouse_position.unwrap_or_default().x }
     }
-}
 
-pub fn mouse_x() -> f32 {
-    unsafe { PLATFORM_DATA.mouse_position.unwrap_or_default().x }
-}
+    pub fn mouse_y(&self) -> f32 {
+        unsafe { PLATFORM_DATA.mouse_position.unwrap_or_default().y }
+    }
 
-pub fn mouse_y() -> f32 {
-    unsafe { PLATFORM_DATA.mouse_position.unwrap_or_default().y }
-}
-
-pub fn mouse_wheel() -> i32 { 0 }
+    pub fn mouse_wheel(&self) -> i32 { 0 }
 
 //pub fn get_window_mouse() -> Vi2d { Vi2d }
 
-pub fn mouse_pos() -> Vf2d {
-    unsafe { PLATFORM_DATA.mouse_position.unwrap_or_default() }
-}
+    pub fn mouse_pos(&self) -> Vf2d {
+        unsafe { PLATFORM_DATA.mouse_position.unwrap_or_default() }
+    }
 
-//Utility
-pub fn screen_width() -> i32 {
-    unsafe { PLATFORM_DATA.screen_size.unwrap_or_default().x }
-}
+    //Utility
+    pub fn screen_width(&self) -> i32 {
+        unsafe { PLATFORM_DATA.screen_size.unwrap_or_default().x }
+    }
 
-pub fn screen_height() -> i32 {
-    unsafe { PLATFORM_DATA.screen_size.unwrap_or_default().y }
-}
+    pub fn screen_height(&self) -> i32 {
+        unsafe { PLATFORM_DATA.screen_size.unwrap_or_default().y }
+    }
 
 
-pub fn get_draw_target_width() -> i32 {
-    get_draw_target_ref().sprite.width as i32
-}
+    pub fn get_draw_target_width(&self) -> i32 {
+        self.get_draw_target_ref().sprite.width as i32
+    }
 
-pub fn get_draw_target_height() -> i32 {
-    get_draw_target_ref().sprite.height as i32
-}
+    pub fn get_draw_target_height(&self) -> i32 {
+        self.get_draw_target_ref().sprite.height as i32
+    }
 
-pub fn set_screen_size(w: i32, h: i32) {}
+    pub fn set_screen_size(&self, w: i32, h: i32) {}
 
 //This is overriden by drawing onto Layers.
 //We may want to do a "DrawTarget" Trait.
 //pub fn set_draw_target(target: &mut Sprite) {}
 //pub fn get_draw_target() -> Sprite { Sprite }
 
-pub fn get_fps() -> i32 { 0 }
+    pub fn get_fps(&self) -> i32 { 0 }
 
-pub fn get_elapsed_time() -> f32 { 0.0 }
+    pub fn get_elapsed_time(&self) -> f32 { 0.0 }
 
-pub fn get_window_size() -> Vi2d {
-    unsafe {
-        PLATFORM_DATA.window_size.unwrap()
+    pub fn get_window_size(&self) -> Vi2d {
+        unsafe {
+            PLATFORM_DATA.window_size.unwrap()
+        }
     }
-}
 
-pub fn get_screen_pixel_size() -> Vi2d {
-    let local_pge_lock = unsafe{ PGE.get().unwrap()};
-    Vi2d::new(local_pge_lock.window_width as i32, local_pge_lock.window_height
-        as i32)
-}
+    pub fn get_screen_pixel_size(&self) -> Vi2d {
+        Vi2d::new(self.window_width as i32, self.window_height as i32)
+    }
 
-pub fn set_draw_target(layer_id: u32) {
-    let mut local_pge_lock = unsafe{PGE.get_mut().unwrap()};
-    (*local_pge_lock).draw_target = layer_id;
-    set_layer_update(layer_id, true);
-}
-pub fn reset_draw_target() {
-    let mut local_pge_lock = unsafe{PGE.get_mut().unwrap()};
-    //set back to background layer
-    local_pge_lock.draw_target = local_pge_lock.layers[0].id;
-}
+    pub fn set_draw_target(&mut self, layer_id: u32) {
+        self.draw_target = layer_id;
+        self.set_layer_update(layer_id, true);
+    }
+    pub fn reset_draw_target(&mut self) {
+        //set back to background layer
+        self.draw_target = self.layers[0].id;
+    }
 
-pub fn get_draw_target<'a>() -> &'a mut LayerDesc {
-    get_layer(unsafe{PGE.get().unwrap()}.draw_target).unwrap()
-}
+    pub fn get_draw_target(&mut self) -> &mut LayerDesc {
+        self.get_layer(self.draw_target).unwrap()
+    }
 
-pub fn get_draw_target_ref<'a>() -> &'a LayerDesc {
-    get_layer_ref(unsafe{PGE.get().unwrap()}.draw_target).unwrap()
-}
+    pub fn get_draw_target_ref(&self) -> &LayerDesc {
+        self.get_layer_ref(self.draw_target).unwrap()
+    }
 
-pub fn set_layer_visible(layer_id: u32, b: bool) {
-    get_layer(layer_id).unwrap().shown = b;
-}
+    pub fn set_layer_visible(&mut self, layer_id: u32, b: bool) {
+        self.get_layer(layer_id).unwrap().shown = b;
+    }
 
-pub fn set_layer_update(layer_id: u32, b: bool) {
-    get_layer(layer_id).unwrap().update = b;
-}
+    pub fn set_layer_update(&mut self, layer_id: u32, b: bool) {
+        self.get_layer(layer_id).unwrap().update = b;
+    }
 
-pub fn set_layer_offset(layer: u8, x: f32, y: f32) {}
+    pub fn set_layer_offset(&self, layer: u8, x: f32, y: f32) {}
 
-pub fn set_layer_scale(layer: u8, x: f32, y: f32) {}
+    pub fn set_layer_scale(&self, layer: u8, x: f32, y: f32) {}
 
-pub fn set_layer_tint(layer: u8, tint: Pixel) {}
+    pub fn set_layer_tint(&self, layer: u8, tint: Pixel) {}
 
 //We'll come back to this
 //pub fn set_layer_custom_render_function
 
-pub fn get_layer_ref<'a>( layer_id: u32) -> Option<&'a LayerDesc> {
-    let layer_iter = unsafe{PGE.get().unwrap()}.layers.iter();
-    for layer in layer_iter {
-        if layer.id == layer_id {
-            return Some(layer);
+    pub fn get_layer_ref(&self, layer_id: u32) -> Option<&LayerDesc> {
+        let layer_iter = self.layers.iter();
+        for layer in layer_iter {
+            if layer.id == layer_id {
+                return Some(layer);
+            }
         }
-    }
-    None
-}
-
-pub fn get_layer<'a>(layer_id: u32) -> Option<&'a mut LayerDesc> {
-    let layer_iter = unsafe{PGE.get_mut().unwrap()}.layers.iter_mut();
-    for layer in layer_iter {
-        if layer.id == layer_id {
-            return Some(layer);
-        }
-    }
-    None
-}
-
-pub fn add_layer() -> u32 {
-    let mut local_pge_lock = unsafe{PGE.get_mut().unwrap()};
-    let layer = LayerDesc::new(local_pge_lock.pixels_w,
-                               local_pge_lock.pixels_h);
-    let r_id = layer.id;
-    local_pge_lock.layers.push(layer);
-    r_id
-}
-
-pub fn load_sprite(path: &str) -> Sprite {
-    Sprite::load_from_file::<BMPLoader>(path)
-}
-
-fn push_decal_instance(di: DecalInstance) {
-    get_draw_target().vec_decal_instance.push(di);
-}
-
-pub fn set_pixel_mode(m: PixelMode) {}
-
-pub fn get_pixel_mode() -> PixelMode { PixelMode::Normal }
-
-pub fn set_pixel_blend(blend: f32) {}
-
-//DRAW ROUTINES
-pub fn draw(x: i32, y: i32, p: Pixel) {
-    get_draw_target().sprite.set_pixel(x as u32, y as u32, p);
-}
-
-pub fn draw_line(pos1: Vi2d, pos2: Vi2d, p: Pixel, pattern: u32) {
-    draw_line_xy(pos1.x, pos1.y, pos2.x, pos2.y, p);
-}
-
-pub fn draw_line_xy(mut x1: i32, mut y1: i32,
-                    mut x2: i32, mut y2: i32, p: Pixel) {
-    let (mut x, mut y, mut dx, mut dy, mut dx1,
-        mut dy1, mut px, mut py, mut xe, mut ye, mut i) = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-    dx = x2 - x1;
-    dy = y2 - y1;
-
-    if dx == 0 {
-        if y2 < y1 { std::mem::swap(&mut y1, &mut y2); }
-        for y in y1..=y2 {
-            draw(x1, y, p);
-        }
-        return;
+        None
     }
 
-    if dy == 0 {
-        if x2 < x1 { std::mem::swap(&mut x1, &mut x2); }
-        for x in x1..=x2 {
-            draw(x, y1, p);
+    pub fn get_layer(&mut self, layer_id: u32) -> Option<&mut LayerDesc> {
+        let layer_iter = self.layers.iter_mut();
+        for layer in layer_iter {
+            if layer.id == layer_id {
+                return Some(layer);
+            }
         }
-        return;
+        None
     }
 
-    dx1 = dx.abs();
-    dy1 = dy.abs();
-    px = 2 * dy1 - dx1;
-    py = 2 * dx1 - dy1;
-    if dy1 <= dx1 {
-        if dx >= 0 {
-            x = x1;
-            y = y1;
-            xe = x2;
-        } else {
-            x = x2;
-            y = y2;
-            xe = x1;
+    pub fn add_layer(&mut self) -> u32 {
+        let layer = LayerDesc::new(self.pixels_w,
+                                   self.pixels_h);
+        let r_id = layer.id;
+        self.layers.push(layer);
+        r_id
+    }
+
+    pub fn load_sprite(&self, path: &str) -> Sprite {
+        Sprite::load_from_file::<BMPLoader>(path)
+    }
+
+    fn push_decal_instance(&mut self, di: DecalInstance) {
+        self.get_draw_target().vec_decal_instance.push(di);
+    }
+
+    pub fn set_pixel_mode(&mut self, m: PixelMode) {}
+
+    pub fn get_pixel_mode(&self) -> PixelMode { PixelMode::Normal }
+
+    pub fn set_pixel_blend(&mut self, blend: f32) {}
+
+    //DRAW ROUTINES
+    pub fn draw(&mut self, x: i32, y: i32, p: Pixel) {
+        self.get_draw_target().sprite.set_pixel(x as u32, y as u32, p);
+    }
+
+    pub fn draw_line(&mut self, pos1: Vi2d, pos2: Vi2d, p: Pixel, pattern: u32) {
+        self.draw_line_xy(pos1.x, pos1.y, pos2.x, pos2.y, p);
+    }
+
+    pub fn draw_line_xy(&mut self, mut x1: i32, mut y1: i32,
+                        mut x2: i32, mut y2: i32, p: Pixel) {
+        let (mut x, mut y, mut dx, mut dy, mut dx1,
+            mut dy1, mut px, mut py, mut xe, mut ye, mut i) = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        dx = x2 - x1;
+        dy = y2 - y1;
+
+        if dx == 0 {
+            if y2 < y1 { std::mem::swap(&mut y1, &mut y2); }
+            for y in y1..=y2 {
+                self.draw(x1, y, p);
+            }
+            return;
         }
 
-        draw(x, y, p);
+        if dy == 0 {
+            if x2 < x1 { std::mem::swap(&mut x1, &mut x2); }
+            for x in x1..=x2 {
+                self.draw(x, y1, p);
+            }
+            return;
+        }
 
-        for i in x..xe {
-            x = x + 1;
-            if px < 0 {
-                px = px + 2 * dy1;
+        dx1 = dx.abs();
+        dy1 = dy.abs();
+        px = 2 * dy1 - dx1;
+        py = 2 * dx1 - dy1;
+        if dy1 <= dx1 {
+            if dx >= 0 {
+                x = x1;
+                y = y1;
+                xe = x2;
             } else {
-                if (dx < 0 && dy < 0) || (dx > 0 && dy > 0) {
-                    y += 1;
+                x = x2;
+                y = y2;
+                xe = x1;
+            }
+
+            self.draw(x, y, p);
+
+            for i in x..xe {
+                x = x + 1;
+                if px < 0 {
+                    px = px + 2 * dy1;
                 } else {
-                    y = y - 1;
+                    if (dx < 0 && dy < 0) || (dx > 0 && dy > 0) {
+                        y += 1;
+                    } else {
+                        y = y - 1;
+                    }
+                    px = px + 2 * (dy1 - dx1);
                 }
-                px = px + 2 * (dy1 - dx1);
+                self.draw(x, y, p);
             }
-            draw(x, y, p);
-        }
-    } else {
-        if dy >= 0 {
-            x = x1;
-            y = y1;
-            ye = y2;
         } else {
-            x = x2;
-            y = y2;
-            ye = y1;
-        }
-        draw(x, y, p);
-
-        for i in y..ye {
-            y = y + 1;
-            if py <= 0 {
-                py = py + 2 * dx1;
+            if dy >= 0 {
+                x = x1;
+                y = y1;
+                ye = y2;
             } else {
-                if (dx < 0 && dy < 0) || (dx > 0 && dy > 0) {
-                    x = x + 1
+                x = x2;
+                y = y2;
+                ye = y1;
+            }
+            self.draw(x, y, p);
+
+            for i in y..ye {
+                y = y + 1;
+                if py <= 0 {
+                    py = py + 2 * dx1;
                 } else {
-                    x = x - 1;
+                    if (dx < 0 && dy < 0) || (dx > 0 && dy > 0) {
+                        x = x + 1
+                    } else {
+                        x = x - 1;
+                    }
+                    py = py + 2 * (dx1 - dy1);
                 }
-                py = py + 2 * (dx1 - dy1);
-            }
-            draw(x, y, p);
-        }
-    }
-}
-
-pub fn draw_circle(pos: Vi2d, r: i32, p: Pixel, mask: u32) {
-    draw_circle_xy(pos.x, pos.y, r, p, mask);
-}
-
-pub fn draw_circle_xy(x: i32, y: i32, r: i32,
-                      p: Pixel, mask: u32) {
-    if r < 0 || x < -r || y < -r || x - get_draw_target_ref().sprite.width as i32 > r
-        || y - get_draw_target_ref().sprite.height as i32 > r {
-        return;
-    }
-    if r > 0 {
-        let (mut x0, mut y0, mut d) = (0, r, 3 - 2 * r);
-        while y0 >= x0 {
-            if mask & 0x01 == 0x01 { draw(x + x0, y - y0, p) };
-            if mask & 0x04 == 0x04 { draw(x + y0, y + x0, p) };
-            if mask & 0x10 == 0x10 { draw(x - x0, y + y0, p) };
-            if mask & 0x40 == 0x40 { draw(x - y0, y - x0, p) };
-            if x0 != 0 && x0 != y0 {
-                if mask & 0x02 == 0x02 { draw(x + y0, y - x0, p) };
-                if mask & 0x08 == 0x08 { draw(x + x0, y + y0, p) };
-                if mask & 0x20 == 0x20 { draw(x - y0, y + x0, p) };
-                if mask & 0x80 == 0x80 { draw(x - x0, y - y0, p) };
-            }
-            if d < 0 {
-                x0 += 1;
-                d += 4 * x0 + 6;
-            } else {
-                x0 += 1;
-                y0 -= 1;
-                d += 4 * (x0 - y0) + 10;
+                self.draw(x, y, p);
             }
         }
-    } else {
-        draw(x, y, p);
-    }
-}
-
-pub fn fill_circle(pos: Vf2d, r: i32, p: Pixel) {
-    fill_circle_xy(pos.x as i32, pos.y as i32, r, p);
-}
-
-pub fn fill_circle_xy(mut x: i32, mut y: i32, r: i32, p: Pixel) {
-    if r < 0 || x < -r || y < -r || x - get_draw_target_ref().sprite.width as i32 > r || y
-        - get_draw_target_ref().sprite.height as i32 > r {
-        return;
     }
 
-    if r > 0 {
-        let (mut x0, mut y0, mut d) = (0, r, 3 - 2 * r);
-        let mut drawline = |sx: i32, ex: i32, y: i32| {
-            for x in sx..=ex {
-                draw(x, y, p);
+    pub fn draw_circle(&mut self, pos: Vi2d, r: i32, p: Pixel, mask: u32) {
+        self.draw_circle_xy(pos.x, pos.y, r, p, mask);
+    }
+
+    pub fn draw_circle_xy(&mut self, x: i32, y: i32, r: i32,
+                          p: Pixel, mask: u32) {
+        if r < 0 || x < -r || y < -r || x - self.get_draw_target_ref().sprite.width as
+            i32 > r || y - self.get_draw_target_ref().sprite.height as i32 > r {
+            return;
+        }
+        if r > 0 {
+            let (mut x0, mut y0, mut d) = (0, r, 3 - 2 * r);
+            while y0 >= x0 {
+                if mask & 0x01 == 0x01 { self.draw(x + x0, y - y0, p) };
+                if mask & 0x04 == 0x04 { self.draw(x + y0, y + x0, p) };
+                if mask & 0x10 == 0x10 { self.draw(x - x0, y + y0, p) };
+                if mask & 0x40 == 0x40 { self.draw(x - y0, y - x0, p) };
+                if x0 != 0 && x0 != y0 {
+                    if mask & 0x02 == 0x02 { self.draw(x + y0, y - x0, p) };
+                    if mask & 0x08 == 0x08 { self.draw(x + x0, y + y0, p) };
+                    if mask & 0x20 == 0x20 { self.draw(x - y0, y + x0, p) };
+                    if mask & 0x80 == 0x80 { self.draw(x - x0, y - y0, p) };
+                }
+                if d < 0 {
+                    x0 += 1;
+                    d += 4 * x0 + 6;
+                } else {
+                    x0 += 1;
+                    y0 -= 1;
+                    d += 4 * (x0 - y0) + 10;
+                }
             }
+        } else {
+            self.draw(x, y, p);
+        }
+    }
+
+    pub fn fill_circle(&mut self, pos: Vf2d, r: i32, p: Pixel) {
+        self.fill_circle_xy(pos.x as i32, pos.y as i32, r, p);
+    }
+
+    pub fn fill_circle_xy(&mut self, mut x: i32, mut y: i32, r: i32, p: Pixel) {
+        if r < 0 || x < -r || y < -r || x - self.get_draw_target_ref().sprite.width as i32 > r || y - self.get_draw_target_ref().sprite.height as i32 > r {
+            return;
+        }
+
+        if r > 0 {
+            let (mut x0, mut y0, mut d) = (0, r, 3 - 2 * r);
+            let mut drawline = |sx: i32, ex: i32, y: i32| {
+                for x in sx..=ex {
+                    self.draw(x, y, p);
+                }
+            };
+
+            while y0 >= x0 {
+                drawline(x - y0, x + y0, y - x0);
+                if x0 > 0 { drawline(x - y0, x + y0, y + x0); }
+
+                if d < 0 {
+                    d += 4 * x0 + 6;
+                    x0 += 1;
+                } else {
+                    if x0 != y0 {
+                        drawline(x - x0, x + x0, y - y0);
+                        drawline(x - x0, x + x0, y + y0);
+                    }
+                    d += 4 * (x0 - y0) + 10;
+                    x0 += 1;
+                    y0 -= 1;
+                }
+            }
+        } else {
+            self.draw(x, y, p);
+        }
+    }
+    pub fn draw_rect(&mut self, pos: Vi2d, size: Vi2d, p: Pixel) {
+        self.draw_rect_xy(pos.x, pos.y, size.x, size.y, p);
+    }
+    pub fn draw_rect_xy(&mut self, x: i32, y: i32, w: i32, h: i32, p: Pixel) {
+        self.draw_line_xy(x, y, x + w, y, p);
+        self.draw_line_xy(x + w, y, x + w, y + h, p);
+        self.draw_line_xy(x + w, y + h, x, y + h, p);
+        self.draw_line_xy(x, y + h, x, y, p);
+    }
+
+    pub fn draw_trangle(&mut self, pos1: Vf2d, pos2: Vf2d,
+                        pos3: Vf2d, p: Pixel) {
+        self.draw_triangle_xy(pos1.x as i32, pos1.y as i32, pos2.x as i32, pos2.y as i32,
+                         pos3.x as i32, pos3.y as i32, p);
+    }
+
+    pub fn draw_triangle_xy(&mut self, x1: i32, y1: i32, x2: i32,
+                            y2: i32, x3: i32, y3: i32, p: Pixel) {
+        self.draw_line_xy(x1, y1, x2, y2, p);
+        self.draw_line_xy(x2, y2, x3, y3, p);
+        self.draw_line_xy(x3, y3, x1, y1, p);
+    }
+
+
+    pub fn fill_triangle(&mut self, mut pos1: Vf2d, mut pos2: Vf2d,
+                         mut pos3: Vf2d, p: Pixel) {
+        //Sort the points so that y1 <= y2 <= y3
+        if pos2.y < pos1.y { std::mem::swap(&mut pos2, &mut pos1); }
+        if pos3.y < pos1.y { std::mem::swap(&mut pos3, &mut pos1); }
+        if pos3.y < pos2.y { std::mem::swap(&mut pos3, &mut pos2); }
+        //This takes two vectors and a y position and returns the x coordinate
+        let interpolate = |l: &Vf2d, r: &Vf2d, y: f32| -> f32{
+            let c = (r.x - l.x) / (r.y - l.y);
+            (c * (y - l.y)) + l.x
         };
 
-        while y0 >= x0 {
-            drawline(x - y0, x + y0, y - x0);
-            if x0 > 0 { drawline(x - y0, x + y0, y + x0); }
-
-            if d < 0 {
-                x0 += 1;
-                d += 4 * x0 + 6;
-            } else {
-                if x0 != y0 {
-                    drawline(x - x0, x + x0, y - y0);
-                    drawline(x - x0, x + x0, y + y0);
+        for y in pos1.y.floor() as i32..pos3.y.floor() as i32 {
+            if y <= pos2.y.floor() as i32 {
+                for x in interpolate(&pos1, &pos3, y as f32) as i32..interpolate(&pos1, &pos2, y as f32) as i32 {
+                    self.draw(x as i32, y, p);
                 }
-                x0 += 1;
-                y0 -= 1;
-                d += 4 * (x0 - y0) + 10;
-            }
-        }
-    } else {
-        draw(x, y, p);
-    }
-}
-pub fn draw_rect(pos: Vi2d, size: Vi2d, p: Pixel) {
-    draw_rect_xy(pos.x, pos.y, size.x, size.y, p);
-}
-pub fn draw_rect_xy(x: i32, y: i32, w: i32, h: i32, p: Pixel) {
-    draw_line_xy(x, y, x + w, y, p);
-    draw_line_xy(x + w, y, x + w, y + h, p);
-    draw_line_xy(x + w, y + h, x, y + h, p);
-    draw_line_xy(x, y + h, x, y, p);
-}
-
-pub fn draw_trangle(pos1: Vf2d, pos2: Vf2d,
-                    pos3: Vf2d, p: Pixel) {
-    draw_triangle_xy(pos1.x as i32, pos1.y as i32, pos2.x as i32, pos2.y as i32,
-                          pos3.x as i32, pos3.y as i32, p);
-}
-
-pub fn draw_triangle_xy(x1: i32, y1: i32, x2: i32,
-                        y2: i32, x3: i32, y3: i32, p: Pixel) {
-    draw_line_xy(x1, y1, x2, y2, p);
-    draw_line_xy(x2, y2, x3, y3, p);
-    draw_line_xy(x3, y3, x1, y1, p);
-}
-
-
-pub fn fill_triangle(mut pos1: Vf2d, mut pos2: Vf2d,
-                    mut pos3: Vf2d, p: Pixel) {
-    //Sort the points so that y1 <= y2 <= y3
-    if pos2.y < pos1.y {std::mem::swap(&mut pos2, &mut pos1);}
-    if pos3.y < pos1.y {std::mem::swap(&mut pos3, &mut pos1);}
-    if pos3.y < pos2.y {std::mem::swap(&mut pos3, &mut pos2);}
-    //This takes two vectors and a y position and returns the x coordinate
-    let interpolate = |l: &Vf2d, r: &Vf2d, y: f32| -> f32{
-        let c = (r.x-l.x)/(r.y-l.y);
-        (c * (y - l.y)) + l.x
-    };
-
-    for y in pos1.y.floor() as i32..pos3.y.floor() as i32{
-        if y <= pos2.y.floor() as i32{
-            for x in interpolate(&pos1, &pos3, y as f32) as i32..
-                interpolate(&pos1, &pos2,y as f32) as i32{
-                draw(x as i32, y, p);
-            }
-        } else {
-            for x in interpolate(&pos1, &pos3, y as f32) as i32..
-                interpolate(&pos2, &pos3,y as f32) as i32{
-                draw(x as i32, y, p);
+            } else {
+                for x in interpolate(&pos1, &pos3, y as f32) as i32..interpolate(&pos2, &pos3, y as f32) as i32 {
+                    self.draw(x as i32, y, p);
+                }
             }
         }
     }
 
-}
+    pub fn clear(&mut self, p: Pixel) {
+        let pixels = self.get_draw_target_height() * self.get_draw_target_width();
 
-pub fn clear(p: Pixel) {
-    let pixels = get_draw_target_height() * get_draw_target_width();
-
-    let mut m = &mut get_draw_target().sprite.col_data;
-    for i in 0..pixels {
-        m[i as usize] = p;
+        let mut m = &mut self.get_draw_target().sprite.col_data;
+        for i in 0..pixels {
+            m[i as usize] = p;
+        }
     }
-}
 
-fn construct_font_sheet() -> Decal {
-    let mut data: String = "".to_string();
-    data += "?Q`0001oOch0o01o@F40o0<AGD4090LAGD<090@A7ch0?00O7Q`0600>00000000";
-    data += "O000000nOT0063Qo4d8>?7a14Gno94AA4gno94AaOT0>o3`oO400o7QN00000400";
-    data += "Of80001oOg<7O7moBGT7O7lABET024@aBEd714AiOdl717a_=TH013Q>00000000";
-    data += "720D000V?V5oB3Q_HdUoE7a9@DdDE4A9@DmoE4A;Hg]oM4Aj8S4D84@`00000000";
-    data += "OaPT1000Oa`^13P1@AI[?g`1@A=[OdAoHgljA4Ao?WlBA7l1710007l100000000";
-    data += "ObM6000oOfMV?3QoBDD`O7a0BDDH@5A0BDD<@5A0BGeVO5ao@CQR?5Po00000000";
-    data += "Oc``000?Ogij70PO2D]??0Ph2DUM@7i`2DTg@7lh2GUj?0TO0C1870T?00000000";
-    data += "70<4001o?P<7?1QoHg43O;`h@GT0@:@LB@d0>:@hN@L0@?aoN@<0O7ao0000?000";
-    data += "OcH0001SOglLA7mg24TnK7ln24US>0PL24U140PnOgl0>7QgOcH0K71S0000A000";
-    data += "00H00000@Dm1S007@DUSg00?OdTnH7YhOfTL<7Yh@Cl0700?@Ah0300700000000";
-    data += "<008001QL00ZA41a@6HnI<1i@FHLM81M@@0LG81?O`0nC?Y7?`0ZA7Y300080000";
-    data += "O`082000Oh0827mo6>Hn?Wmo?6HnMb11MP08@C11H`08@FP0@@0004@000000000";
-    data += "00P00001Oab00003OcKP0006@6=PMgl<@440MglH@000000`@000001P00000000";
-    data += "Ob@8@@00Ob@8@Ga13R@8Mga172@8?PAo3R@827QoOb@820@0O`0007`0000007P0";
-    data += "O`000P08Od400g`<3V=P0G`673IP0`@3>1`00P@6O`P00g`<O`000GP800000000";
-    data += "?P9PL020O`<`N3R0@E4HC7b0@ET<ATB0@@l6C4B0O`H3N7b0?P01L3R000000020";
+    fn construct_font_sheet(&mut self) {
+        let mut data: String = "".to_string();
+        data += "?Q`0001oOch0o01o@F40o0<AGD4090LAGD<090@A7ch0?00O7Q`0600>00000000";
+        data += "O000000nOT0063Qo4d8>?7a14Gno94AA4gno94AaOT0>o3`oO400o7QN00000400";
+        data += "Of80001oOg<7O7moBGT7O7lABET024@aBEd714AiOdl717a_=TH013Q>00000000";
+        data += "720D000V?V5oB3Q_HdUoE7a9@DdDE4A9@DmoE4A;Hg]oM4Aj8S4D84@`00000000";
+        data += "OaPT1000Oa`^13P1@AI[?g`1@A=[OdAoHgljA4Ao?WlBA7l1710007l100000000";
+        data += "ObM6000oOfMV?3QoBDD`O7a0BDDH@5A0BDD<@5A0BGeVO5ao@CQR?5Po00000000";
+        data += "Oc``000?Ogij70PO2D]??0Ph2DUM@7i`2DTg@7lh2GUj?0TO0C1870T?00000000";
+        data += "70<4001o?P<7?1QoHg43O;`h@GT0@:@LB@d0>:@hN@L0@?aoN@<0O7ao0000?000";
+        data += "OcH0001SOglLA7mg24TnK7ln24US>0PL24U140PnOgl0>7QgOcH0K71S0000A000";
+        data += "00H00000@Dm1S007@DUSg00?OdTnH7YhOfTL<7Yh@Cl0700?@Ah0300700000000";
+        data += "<008001QL00ZA41a@6HnI<1i@FHLM81M@@0LG81?O`0nC?Y7?`0ZA7Y300080000";
+        data += "O`082000Oh0827mo6>Hn?Wmo?6HnMb11MP08@C11H`08@FP0@@0004@000000000";
+        data += "00P00001Oab00003OcKP0006@6=PMgl<@440MglH@000000`@000001P00000000";
+        data += "Ob@8@@00Ob@8@Ga13R@8Mga172@8?PAo3R@827QoOb@820@0O`0007`0000007P0";
+        data += "O`000P08Od400g`<3V=P0G`673IP0`@3>1`00P@6O`P00g`<O`000GP800000000";
+        data += "?P9PL020O`<`N3R0@E4HC7b0@ET<ATB0@@l6C4B0O`H3N7b0?P01L3R000000020";
 
-    let mut font_sprite = Sprite::new(128, 48);
-    let mut py = 0;
-    let mut px = 0;
-    let mut data_chars: [u8; 1024] = [0; 1024];
-    for (i, c) in data.chars().enumerate() {
-        data_chars[i] = c as u8;
-    }
-    for b in (0..1024).step_by(4) {
-        let sym1: u32 = (data_chars[b + 0] as u32) - 48;
-        let sym2: u32 = (data_chars[b + 1] as u32) - 48;
-        let sym3: u32 = (data_chars[b + 2] as u32) - 48;
-        let sym4: u32 = (data_chars[b + 3] as u32) - 48;
-        let r: u32 = sym1 << 18 | sym2 << 12 | sym3 << 6 | sym4;
+        let mut font_sprite = Sprite::new(128, 48);
+        let mut py = 0;
+        let mut px = 0;
+        let mut data_chars: [u8; 1024] = [0; 1024];
+        for (i, c) in data.chars().enumerate() {
+            data_chars[i] = c as u8;
+        }
+        for b in (0..1024).step_by(4) {
+            let sym1: u32 = (data_chars[b + 0] as u32) - 48;
+            let sym2: u32 = (data_chars[b + 1] as u32) - 48;
+            let sym3: u32 = (data_chars[b + 2] as u32) - 48;
+            let sym4: u32 = (data_chars[b + 3] as u32) - 48;
+            let r: u32 = sym1 << 18 | sym2 << 12 | sym3 << 6 | sym4;
 
-        for i in 0..24 {
-            let k: u8 = if r & (1 << i) > 0 { 255 } else { 0 };
-            font_sprite.set_pixel(px, py, Pixel::rgba(k, k, k, k));
-            py += 1;
-            if py == 48 {
-                px += 1;
-                py = 0;
+            for i in 0..24 {
+                let k: u8 = if r & (1 << i) > 0 { 255 } else { 0 };
+                font_sprite.set_pixel(px, py, Pixel::rgba(k, k, k, k));
+                py += 1;
+                if py == 48 {
+                    px += 1;
+                    py = 0;
+                }
             }
         }
+        self.font_decal = Decal::create(Some(font_sprite));
     }
-    Decal::create(Some(font_sprite))
-}
 
-pub fn draw_decal(pos: Vf2d, decal: &Decal){
-    draw_decal_with_scale_and_tint(pos, decal, Vf2d::new(1.0,1.0), Pixel::WHITE);
-}
-
-pub fn draw_decal_with_scale(pos: Vf2d, decal: &Decal,
-                  scale: Vf2d){
-    draw_decal_with_scale_and_tint(pos, decal, scale, Pixel::WHITE);
-}
-pub fn draw_decal_with_tint(pos: Vf2d, decal: &Decal, tint: Pixel){
-    draw_decal_with_scale_and_tint(pos, decal, Vf2d::new(1.0,1.0), tint);
-}
-
-pub fn draw_decal_with_scale_and_tint(pos: Vf2d, decal: &Decal,
-                  scale: Vf2d, tint: Pixel) {
-    let local_pge_lock = unsafe{PGE.get().unwrap()};
-    let screen_space_pos = Vf2d::from((
-        (pos.x * local_pge_lock.inv_screen_size.x) * 2.0 - 1.0,
-        ((pos.y * local_pge_lock.inv_screen_size.y) * 2.0 - 1.0) * -1.0
-    ));
-    let screen_space_dim = Vf2d::from((
-        screen_space_pos.x + (2.0 * (decal.get().sprite.width as f32) *
-            local_pge_lock.inv_screen_size.x),
-        screen_space_pos.y - (2.0 * (decal.get().sprite.height as f32) *
-            local_pge_lock.inv_screen_size.y)
-    ));
-    let mut di = DecalInstance::new();
-    di.decal = Some(decal.get());
-    di.tint[0] = tint;
-    di.pos[0] = Vf2d::from((screen_space_pos.x, screen_space_pos.y));
-    di.pos[1] = Vf2d::from((screen_space_pos.x, screen_space_dim.y));
-    di.pos[2] = Vf2d::from((screen_space_dim.x, screen_space_dim.y));
-    di.pos[3] = Vf2d::from((screen_space_dim.x, screen_space_pos.y));
-    push_decal_instance(di);
-    //self.get_draw_target().vec_decal_instance.push(di);
-}
-
-pub fn draw_partial_decal(pos: Vf2d, decal: &Decal,
-                          source_pos: Vf2d, source_size: Vf2d, scale: Vf2d,
-                          tint: Pixel) {
-    let local_pge_lock = unsafe{PGE.get().unwrap()};
-    let screen_space_pos = Vf2d::from((
-        (pos.x * local_pge_lock.inv_screen_size.x) * 2.0 - 1.0,
-        ((pos.y * local_pge_lock.inv_screen_size.y) * 2.0 - 1.0) * -1.0
-    ));
-    let screen_space_dim = Vf2d::from((
-        screen_space_pos.x + (2.0 * (source_size.x as f32) * local_pge_lock.inv_screen_size.x) *
-            scale.x,
-        screen_space_pos.y - (2.0 * (source_size.y as f32) * local_pge_lock
-            .inv_screen_size.y) * scale.y
-    ));
-    let mut di = DecalInstance::new();
-    di.decal = Some(decal.get());
-    di.tint[0] = tint;
-
-    di.pos[0] = Vf2d::from((screen_space_pos.x, screen_space_pos.y));
-    di.pos[1] = Vf2d::from((screen_space_pos.x, screen_space_dim.y));
-    di.pos[2] = Vf2d::from((screen_space_dim.x, screen_space_dim.y));
-    di.pos[3] = Vf2d::from((screen_space_dim.x, screen_space_pos.y));
-
-    let uvtl = Vf2d::from((
-        source_pos.x * decal.get().uv_scale.x,
-        source_pos.y * decal.get().uv_scale.y
-    ));
-
-    let uvbr = Vf2d::from((
-        uvtl.x + (source_size.x * decal.get().uv_scale.x),
-        uvtl.y + (source_size.y * decal.get().uv_scale.y)
-    ));
-
-    di.uv[0] = Vf2d::from((uvtl.x, uvtl.y));
-    di.uv[1] = Vf2d::from((uvtl.x, uvbr.y));
-    di.uv[2] = Vf2d::from((uvbr.x, uvbr.y));
-    di.uv[3] = Vf2d::from((uvbr.x, uvtl.y));
-    push_decal_instance(di);
-}
-
-pub fn draw_rotated_decal(pos: Vf2d, decal: &Decal,
-                          angle: f32, center: Vf2d, scale: Vf2d, tint: Pixel) {
-    let local_pge_lock = unsafe{PGE.get().unwrap()};
-    let mut di = DecalInstance::new();
-    let d_ref = decal.get();
-    di.decal = Some(decal.get());
-    di.tint[0] = tint;
-    di.pos[0] = Vf2d::new(0.0 - center.x * scale.x,
-                          0.0 - center.y * scale.y);
-    di.pos[1] = Vf2d::new(0.0 - center.x * scale.x,
-                          d_ref.sprite.height as f32 - center.y * scale.y);
-    di.pos[2] = Vf2d::new(d_ref.sprite.width as f32 - center.x * scale.x,
-                          d_ref.sprite.height as f32 - center.y * scale.y);
-    di.pos[3] = Vf2d::new(d_ref.sprite.width as f32 - center.x * scale.x,
-                          0.0 - center.y * scale.y);
-    let (c, s) = (angle.cos(), angle.sin());
-    for i in 0..4 {
-        di.pos[i] = Vf2d::new(
-            di.pos[1].x * c - di.pos[i].y * s,
-            di.pos[i].x * s + di.pos[i].y * c);
-        di.pos[i] = Vf2d::new(di.pos[i].x * local_pge_lock.inv_screen_size.x * 2.0 - 1.0,
-                              di.pos[i].y * local_pge_lock.inv_screen_size.y * 2.0 - 1.0);
-        di.pos[i].y += -1.0;
+    pub fn draw_decal(&mut self, pos: Vf2d, decal: Arc<SmallD>) {
+        self.draw_decal_with_scale_and_tint(pos, decal, Vf2d::new(1.0, 1.0),
+                                            Pixel::WHITE);
     }
-    push_decal_instance(di);
-}
 
+    pub fn draw_decal_with_scale(&mut self, pos: Vf2d, decal: Arc<SmallD>,
+                                 scale: Vf2d) {
+        self.draw_decal_with_scale_and_tint(pos, decal, scale, Pixel::WHITE);
+    }
+    pub fn draw_decal_with_tint(&mut self, pos: Vf2d, decal: Arc<SmallD>, tint: Pixel) {
+        self.draw_decal_with_scale_and_tint(pos, decal, Vf2d::new(1.0, 1.0), tint);
+    }
 
-pub fn draw_warped_decal(decal: &Decal, pos: Vec<Vf2d>) {
-    draw_warped_decal_with_tint(decal, pos, Pixel::WHITE);
-}
+    pub fn draw_decal_with_scale_and_tint(&mut self, pos: Vf2d, decal: Arc<SmallD>,
+                                          scale: Vf2d, tint: Pixel) {
+        let screen_space_pos = Vf2d::from((
+            (pos.x * self.inv_screen_size.x) * 2.0 - 1.0,
+            ((pos.y * self.inv_screen_size.y) * 2.0 - 1.0) * -1.0
+        ));
+        let screen_space_dim = Vf2d::from((
+            screen_space_pos.x + (2.0 * (decal.sprite.width as f32) * self.inv_screen_size.x),
+            screen_space_pos.y - (2.0 * (decal.sprite.height as f32) * self.inv_screen_size.y)
+        ));
+        let mut di = DecalInstance::new();
+        di.decal = Some(decal);
+        di.tint[0] = tint;
+        di.pos[0] = Vf2d::from((screen_space_pos.x, screen_space_pos.y));
+        di.pos[1] = Vf2d::from((screen_space_pos.x, screen_space_dim.y));
+        di.pos[2] = Vf2d::from((screen_space_dim.x, screen_space_dim.y));
+        di.pos[3] = Vf2d::from((screen_space_dim.x, screen_space_pos.y));
+        self.push_decal_instance(di);
+        //self.get_draw_target().vec_decal_instance.push(di);
+    }
 
-pub fn draw_warped_decal_with_tint(decal: &Decal, pos: Vec<Vf2d>, tint: Pixel) {
-    let local_pge_lock = unsafe{PGE.get().unwrap()};
-    let mut di = DecalInstance::new();
-    di.decal = Some(decal.get());
-    di.tint[0] = tint;
-    let mut center = Vf2d::new(0.0, 0.0);
-    let mut rd: f32 = ((pos[2].x - pos[0].x) * (pos[3].y - pos[1].y) -
-        (pos[3].x - pos[1].x) * (pos[2].y - pos[0].y));
-    if rd != 0.0 {
-        rd = 1.0 / rd;
-        let rn: f32 = ((pos[3].x - pos[1].x) * (pos[0].y - pos[1].y) -
-            (pos[3].y - pos[1].y) * (pos[0].x - pos[1].x)) * rd;
-        let sn: f32 = ((pos[2].x - pos[0].x) * (pos[0].y - pos[1].y) -
-            (pos[2].y - pos[0].y) * (pos[0].x - pos[1].x)) * rd;
-        if !(rn < 0.0 || rn > 1.0 || sn < 0.0 || sn > 1.0) {
-            let i = pos[2] - pos[0];
-            center = pos[0] + Vf2d::new(rn * i.x, rn * i.y);
-        }
-        let mut d: [f32; 4] = [0.0; 4];
+    pub fn draw_partial_decal(&mut self, pos: Vf2d, decal: Arc<SmallD>,
+                              source_pos: Vf2d, source_size: Vf2d, scale: Vf2d,
+                              tint: Pixel) {
+        let screen_space_pos = Vf2d::from((
+            (pos.x * self.inv_screen_size.x) * 2.0 - 1.0,
+            ((pos.y * self.inv_screen_size.y) * 2.0 - 1.0) * -1.0
+        ));
+        let screen_space_dim = Vf2d::from((
+            screen_space_pos.x + (2.0 * (source_size.x as f32) * self.inv_screen_size.x) * scale.x,
+            screen_space_pos.y - (2.0 * (source_size.y as f32) * self.inv_screen_size.y) * scale.y
+        ));
+        let mut di = DecalInstance::new();
+        di.tint[0] = tint;
+
+        di.pos[0] = Vf2d::from((screen_space_pos.x, screen_space_pos.y));
+        di.pos[1] = Vf2d::from((screen_space_pos.x, screen_space_dim.y));
+        di.pos[2] = Vf2d::from((screen_space_dim.x, screen_space_dim.y));
+        di.pos[3] = Vf2d::from((screen_space_dim.x, screen_space_pos.y));
+
+        let uvtl = Vf2d::from((
+            source_pos.x * decal.uv_scale.x,
+            source_pos.y * decal.uv_scale.y
+        ));
+
+        let uvbr = Vf2d::from((
+            uvtl.x + (source_size.x * decal.uv_scale.x),
+            uvtl.y + (source_size.y * decal.uv_scale.y)
+        ));
+
+        di.uv[0] = Vf2d::from((uvtl.x, uvtl.y));
+        di.uv[1] = Vf2d::from((uvtl.x, uvbr.y));
+        di.uv[2] = Vf2d::from((uvbr.x, uvbr.y));
+        di.uv[3] = Vf2d::from((uvbr.x, uvtl.y));
+        di.decal = Some(decal);
+        self.push_decal_instance(di);
+    }
+
+    pub fn draw_rotated_decal(&mut self, pos: Vf2d, decal: Arc<SmallD>,
+                              angle: f32, center: Vf2d, scale: Vf2d, tint: Pixel) {
+        let mut di = DecalInstance::new();
+        di.tint[0] = tint;
+        di.pos[0] = Vf2d::new(0.0 - center.x * scale.x,
+                              0.0 - center.y * scale.y);
+        di.pos[1] = Vf2d::new(0.0 - center.x * scale.x,
+                              decal.sprite.height as f32 - center.y * scale.y);
+        di.pos[2] = Vf2d::new(decal.sprite.width as f32 - center.x * scale.x,
+                              decal.sprite.height as f32 - center.y * scale.y);
+        di.pos[3] = Vf2d::new(decal.sprite.width as f32 - center.x * scale.x,
+                              0.0 - center.y * scale.y);
+        let (c, s) = (angle.cos(), angle.sin());
         for i in 0..4 {
-            d[i] = (pos[i] - center).mag();
+            di.pos[i] = Vf2d::new(
+                di.pos[1].x * c - di.pos[i].y * s,
+                di.pos[i].x * s + di.pos[i].y * c);
+            di.pos[i] = Vf2d::new(di.pos[i].x * self.inv_screen_size.x * 2.0 - 1.0,
+                                  di.pos[i].y * self.inv_screen_size.y * 2.0 - 1.0);
+            di.pos[i].y += -1.0;
         }
-        for i in 0..4 {
-            let q = if d[i] == 0.0 { 1.0 } else { (d[i] + d[(i + 2) & 3]) / d[(i + 2) & 3] };
-            di.uv[i].x *= q;
-            di.uv[i].y *= q;
-            di.w[i] *= q;
-            di.pos[i] = Vf2d::new((pos[i].x * local_pge_lock.inv_screen_size.x) * 2.0 - 1.0,
-                                  ((pos[i].y * local_pge_lock.inv_screen_size.y) * 2.0 - 1.0) *
-                                      -1.0);
-        }
-        push_decal_instance(di);
+        di.decal = Some(decal);
+        self.push_decal_instance(di);
     }
-}
 
-pub fn draw_partial_warped_decal(decal: &Decal, pos: Vec<Vf2d>,
-                                 source_pos: Vf2d, source_size: Vf2d, tint: Pixel){
 
-    let local_pge_lock = unsafe{PGE.get().unwrap()};
-    let mut di = DecalInstance::new();
-    di.decal = Some(decal.get());
-    di.tint[0] = tint;
-    let mut center = Vf2d::new(0.0,0.0);
-    let mut rd: f32 = ((pos[2].x - pos[0].x) * (pos[3].y - pos[1].y) - (pos[3].x -
-        pos[1].x) * (pos[2].y - pos[0].y));
-    if rd != 0.0 {
-        let uvtl = Vf2d::new(source_pos.x * decal.get().uv_scale.x,
-                             source_pos.y * decal.get().uv_scale.y);
+    pub fn draw_warped_decal(&mut self, decal: Arc<SmallD>, pos: &[Vf2d]) {
+        self.draw_warped_decal_with_tint(decal, pos, Pixel::WHITE);
+    }
 
-        let uvbr = Vf2d::new(uvtl.x + (source_size.x * decal.get().uv_scale.x),
-                             uvtl.y + (source_size.y * decal.get().uv_scale.y));
+    pub fn draw_warped_decal_with_tint(&mut self, decal: Arc<SmallD>, pos: &[Vf2d],
+                                       tint: Pixel) {
+        let mut di = DecalInstance::new();
+        di.decal = Some(decal);
+        di.tint[0] = tint;
+        let mut center = Vf2d::new(0.0, 0.0);
+        let mut rd: f32 = ((pos[2].x - pos[0].x) * (pos[3].y - pos[1].y) - (pos[3].x - pos[1].x) * (pos[2].y - pos[0].y));
+        if rd != 0.0 {
+            rd = 1.0 / rd;
+            let rn: f32 = ((pos[3].x - pos[1].x) * (pos[0].y - pos[1].y) - (pos[3].y - pos[1].y) * (pos[0].x - pos[1].x)) * rd;
+            let sn: f32 = ((pos[2].x - pos[0].x) * (pos[0].y - pos[1].y) - (pos[2].y - pos[0].y) * (pos[0].x - pos[1].x)) * rd;
+            if !(rn < 0.0 || rn > 1.0 || sn < 0.0 || sn > 1.0) {
+                let i = pos[2] - pos[0];
+                center = pos[0] + Vf2d::new(rn * i.x, rn * i.y);
+            }
+            let mut d: [f32; 4] = [0.0; 4];
+            for i in 0..4 {
+                d[i] = (pos[i] - center).mag();
+            }
+            for i in 0..4 {
+                let q = if d[i] == 0.0 { 1.0 } else { (d[i] + d[(i + 2) & 3]) / d[(i + 2) & 3] };
+                di.uv[i].x *= q;
+                di.uv[i].y *= q;
+                di.w[i] *= q;
+                di.pos[i] = Vf2d::new((pos[i].x * self.inv_screen_size.x) * 2.0 - 1.0,
+                                      ((pos[i].y * self.inv_screen_size.y) * 2.0 - 1.0) * -1.0);
+            }
+            self.push_decal_instance(di);
+        }
+    }
+
+    pub fn draw_partial_warped_decal(&mut self, decal: Arc<SmallD>, pos: Vec<Vf2d>,
+                                     source_pos: Vf2d, source_size: Vf2d, tint: Pixel) {
+        let mut di = DecalInstance::new();
+        di.tint[0] = tint;
+        let mut center = Vf2d::new(0.0, 0.0);
+        let mut rd: f32 = ((pos[2].x - pos[0].x) * (pos[3].y - pos[1].y) - (pos[3].x - pos[1].x) * (pos[2].y - pos[0].y));
+        if rd != 0.0 {
+            let uvtl = Vf2d::new(source_pos.x * decal.uv_scale.x,
+                                 source_pos.y * decal.uv_scale.y);
+
+            let uvbr = Vf2d::new(uvtl.x + (source_size.x * decal.uv_scale.x),
+                                 uvtl.y + (source_size.y * decal.uv_scale.y));
+
+            di.uv[0] = Vf2d::new(uvtl.x, uvtl.y);
+            di.uv[1] = Vf2d::new(uvtl.x, uvbr.y);
+            di.uv[2] = Vf2d::new(uvbr.x, uvbr.y);
+            di.uv[3] = Vf2d::new(uvbr.x, uvtl.y);
+            rd = 1.0 / rd;
+            let rn: f32 = ((pos[3].x - pos[1].x) * (pos[0].y - pos[1].y) - (pos[3].y - pos[1].y) * (pos[0].x - pos[1].x)) * rd;
+            let sn: f32 = ((pos[2].x - pos[0].x) * (pos[0].y - pos[1].y) - (pos[2].y - pos[0].y) * (pos[0].x - pos[1].x)) * rd;
+            if !(rn < 0.0 || rn > 1.0 || sn < 0.0 || sn > 1.0) {
+                let i = pos[2] - pos[0];
+                center = Vf2d::new(pos[0].x + rn, pos[0].y + rn) * i;
+            }
+            let mut d: [f32; 4] = [0.0; 4];
+            for i in 0..4 {
+                d[i] = (pos[i] - center).mag();
+            }
+            for i in 0..4 {
+                let q = if d[i] == 0.0 { 1.0 } else { (d[i] + d[(i + 2) & 3]) / d[(i + 2) & 3] };
+                di.uv[i].x *= q;
+                di.uv[i].y *= q;
+                di.w[i] *= q;
+                di.pos[i] = Vf2d::new((pos[i].x * self.inv_screen_size.x) * 2.0 - 1.0,
+                                      ((pos[i].y * self.inv_screen_size.y) * 2.0 - 1.0) * -1.0);
+            }
+            di.decal = Some(decal);
+            self.push_decal_instance(di);
+        }
+    }
+
+    pub fn draw_explicit_decal(&mut self, decal: Arc<SmallD>,
+                               pos: Vec<Vf2d>, uv: Vec<Vf2d>, col: Vec<Pixel>) {
+        let mut di = DecalInstance::new();
+        di.decal = Some(decal);
+
+        unsafe {
+            for i in 0..4 {
+                di.pos[i] = Vf2d::from((
+                    (pos[i].x * self.inv_screen_size.x) * 2.0 - 1.0,
+                    (pos[i].y * self.inv_screen_size.y) * 2.0 - 1.0));
+                di.uv[i] = uv[i];
+                di.tint[i] = col[i];
+            }
+        }
+        self.push_decal_instance(di);
+    }
+
+    pub fn fill_rect_decal(&mut self, pos: Vf2d, size: Vf2d, col: Pixel) {
+        let points = vec![pos, Vf2d::new(pos.x, pos.y + size.y),
+                          pos + size, Vf2d::new(pos.x + size.x, pos.y)];
+        let uvs = vec![Vf2d::new(0.0, 0.0), Vf2d::new(0.0, 0.0),
+                       Vf2d::new(0.0, 0.0), Vf2d::new(0.0, 0.0)];
+        let cols = vec![col, col, col, col];
+        self.draw_explicit_decal(Decal::new().get(), points, uvs, cols);
+    }
+
+    pub fn gradient_fill_rect_decal(&mut self, pos: Vf2d, size: Vf2d,
+                                    colTL: Pixel, colBL: Pixel,
+                                    colTR: Pixel, colBR: Pixel) {
+        let points = vec![pos, Vf2d::new(pos.x, pos.y + size.y),
+                          pos + size, Vf2d::new(pos.x + size.x, pos.y)];
+        let uvs = vec![Vf2d::new(0.0, 0.0), Vf2d::new(0.0, 0.0),
+                       Vf2d::new(0.0, 0.0), Vf2d::new(0.0, 0.0)];
+        let cols = vec![colTL, colBL, colBR, colTR];
+        self.draw_explicit_decal(Decal::new().get(), points, uvs, cols);
+    }
+
+    pub fn draw_partial_rotated_decal(&mut self, pos: Vf2d, decal: Arc<SmallD>,
+                                      angle: f32, center: Vf2d, source_pos: Vf2d,
+                                      source_size: Vf2d, scale: Vf2d, tint: Pixel) {
+        let mut di = DecalInstance::new();
+        di.tint[0] = tint;
+        di.pos[0] = (Vf2d::new(0.0, 0.0) - center) * scale;
+        di.pos[1] = (Vf2d::new(0.0, source_size.y) - center) * scale;
+        di.pos[2] = (Vf2d::new(source_size.x, source_size.y) - center) * scale;
+        di.pos[3] = (Vf2d::new(source_size.x, 0.0) - center) * scale;
+        let (c, s) = (angle.cos(), angle.sin());
+        for i in 0..4 {
+            di.pos[i] = Vf2d::new(
+                di.pos[1].x * c - di.pos[i].y * s,
+                di.pos[i].x * s + di.pos[i].y * c);
+            di.pos[i] = Vf2d::new(di.pos[i].x * self.inv_screen_size.x * 2.0 - 1.0,
+                                  di.pos[i].y * self.inv_screen_size.y * 2.0 - 1.0);
+            di.pos[i].y += -1.0;
+        }
+        let uvtl = Vf2d::new(source_pos.x * decal.uv_scale.x,
+                             source_pos.y * decal.uv_scale.y);
+
+        let uvbr = Vf2d::new(uvtl.x + (source_size.x * decal.uv_scale.x),
+                             uvtl.y + (source_size.y * decal.uv_scale.y));
 
         di.uv[0] = Vf2d::new(uvtl.x, uvtl.y);
         di.uv[1] = Vf2d::new(uvtl.x, uvbr.y);
         di.uv[2] = Vf2d::new(uvbr.x, uvbr.y);
         di.uv[3] = Vf2d::new(uvbr.x, uvtl.y);
-        rd = 1.0 / rd;
-        let rn: f32 = ((pos[3].x - pos[1].x) * (pos[0].y - pos[1].y) - (pos[3].y - pos[1].y) * (pos[0].x - pos[1].x)) * rd;
-        let sn: f32 = ((pos[2].x - pos[0].x) * (pos[0].y - pos[1].y) - (pos[2].y - pos[0].y) * (pos[0].x - pos[1].x)) * rd;
-        if !(rn < 0.0 || rn > 1.0 || sn < 0.0 || sn > 1.0) {
-            let i = pos[2] - pos[0];
-            center = Vf2d::new(pos[0].x + rn, pos[0].y + rn) * i;
-        }
-        let mut d: [f32; 4] = [0.0; 4];
-        for i in 0..4 {
-            d[i] = (pos[i] - center).mag();
-        }
-        for i in 0..4 {
-            let q = if d[i] == 0.0 { 1.0 } else { (d[i] + d[(i + 2) & 3]) / d[(i + 2) & 3] };
-            di.uv[i].x *= q;
-            di.uv[i].y *= q;
-            di.w[i] *= q;
-            di.pos[i] = Vf2d::new((pos[i].x * local_pge_lock.inv_screen_size.x) * 2.0 - 1.0,
-                                  ((pos[i].y * local_pge_lock.inv_screen_size.y) *
-                                      2.0 - 1.0) * -1.0);
-        }
-        push_decal_instance(di);
+        di.decal = Some(decal);
+        self.push_decal_instance(di);
     }
-}
+    pub fn draw_string_decal(&mut self, pos: Vf2d, text: &str){
+        self.draw_string_decal_with_color_and_scale(pos, text, Pixel::WHITE,
+                                                    Vf2d::new(1.0,1.0));
+    }
 
-pub fn draw_explicit_decal(decal: &Decal,
-                           pos: Vec<Vf2d>, uv: Vec<Vf2d>, col: Vec<Pixel>) {
-    let mut di = DecalInstance::new();
-    di.decal = Some(decal.get());
+    pub fn draw_string_decal_with_color(&mut self, pos: Vf2d, text: &str, col: Pixel){
+        self.draw_string_decal_with_color_and_scale(pos, text, col, Vf2d::new(1.0,1.0));
+    }
 
-    let local_pge_lock = unsafe{PGE.get().unwrap()};
-    unsafe {
-        for i in 0..4 {
-            di.pos[i] = Vf2d::from((
-                (pos[i].x * local_pge_lock.inv_screen_size.x) * 2.0 - 1.0,
-                (pos[i].y * local_pge_lock.inv_screen_size.y) * 2.0 - 1.0));
-            di.uv[i] = uv[i];
-            di.tint[i] = col[i];
+    pub fn draw_string_decal_with_scale(&mut self, pos: Vf2d, text: &str, scale: Vf2d){
+        self.draw_string_decal_with_color_and_scale(pos, text, Pixel::WHITE, scale);
+    }
+
+    pub fn draw_string_decal_with_color_and_scale(&mut self,
+                                                  pos: Vf2d,
+                                                  text: &str,
+                                                  col: Pixel,
+                                                  scale: Vf2d) {
+        //self.draw_decal(pos, &FONT_DECAL, scale, Pixel::WHITE);
+        let mut spos = Vf2d::new(0.0, 0.0);
+        for c in text.chars() {
+            if c == '\n' {
+                spos.x = 0.0;
+                spos.y += 8.0 * scale.y;
+            } else {
+                let ox = (c as u8 - 32) % 16;
+                let oy = (c as u8 - 32) / 16;
+                self.draw_partial_decal(pos + spos, self.font_decal.get(),
+                                   Vf2d::new(ox as f32 * 8.0, oy as f32 * 8.0),
+                                   Vf2d::new(8.0, 8.0), scale, col);
+                spos.x += 8.0 * scale.x;
+            }
         }
     }
-    push_decal_instance(di);
-}
 
-pub fn fill_rect_decal(pos: Vf2d, size: Vf2d, col: Pixel) {
-    let points = vec![pos, Vf2d::new(pos.x, pos.y + size.y),
-                      pos + size, Vf2d::new(pos.x + size.x, pos.y)];
-    let uvs = vec![Vf2d::new(0.0, 0.0), Vf2d::new(0.0, 0.0),
-                   Vf2d::new(0.0, 0.0), Vf2d::new(0.0, 0.0)];
-    let cols = vec![col, col, col, col];
-    draw_explicit_decal(&Decal::new(), points, uvs, cols);
-}
-
-pub fn gradient_fill_rect_decal(pos: Vf2d, size: Vf2d,
-                                colTL: Pixel, colBL: Pixel,
-                                colTR: Pixel, colBR: Pixel) {
-    let points = vec![pos, Vf2d::new(pos.x, pos.y + size.y),
-                      pos + size, Vf2d::new(pos.x + size.x, pos.y)];
-    let uvs = vec![Vf2d::new(0.0, 0.0), Vf2d::new(0.0, 0.0),
-                   Vf2d::new(0.0, 0.0), Vf2d::new(0.0, 0.0)];
-    let cols = vec![colTL, colBL, colBR, colTR];
-    draw_explicit_decal(&Decal::new(), points, uvs, cols);
-}
-
-pub fn draw_partial_rotated_decal(pos: Vf2d, decal: &Decal,
-                                  angle: f32, center: Vf2d, source_pos: Vf2d,
-                                  source_size: Vf2d, scale: Vf2d, tint: Pixel) {
-    let local_pge_lock = unsafe{PGE.get().unwrap()};
-    let mut di = DecalInstance::new();
-    di.decal = Some(decal.get());
-    di.tint[0] = tint;
-    di.pos[0] = (Vf2d::new(0.0, 0.0) - center) * scale;
-    di.pos[1] = (Vf2d::new(0.0, source_size.y) - center) * scale;
-    di.pos[2] = (Vf2d::new(source_size.x, source_size.y) - center) * scale;
-    di.pos[3] = (Vf2d::new(source_size.x, 0.0) - center) * scale;
-    let (c, s) = (angle.cos(), angle.sin());
-    for i in 0..4 {
-        di.pos[i] = Vf2d::new(
-            di.pos[1].x * c - di.pos[i].y * s,
-            di.pos[i].x * s + di.pos[i].y * c);
-        di.pos[i] = Vf2d::new(di.pos[i].x * local_pge_lock.inv_screen_size
-            .x * 2.0 - 1.0,
-                              di.pos[i].y * local_pge_lock.inv_screen_size.y * 2.0 - 1.0);
-        di.pos[i].y += -1.0;
-    }
-    let uvtl = Vf2d::new(source_pos.x * decal.get().uv_scale.x,
-                         source_pos.y * decal.get().uv_scale.y);
-
-    let uvbr = Vf2d::new(uvtl.x + (source_size.x * decal.get().uv_scale.x),
-                         uvtl.y + (source_size.y * decal.get().uv_scale.y));
-
-    di.uv[0] = Vf2d::new(uvtl.x, uvtl.y);
-    di.uv[1] = Vf2d::new(uvtl.x, uvbr.y);
-    di.uv[2] = Vf2d::new(uvbr.x, uvbr.y);
-    di.uv[3] = Vf2d::new(uvbr.x, uvtl.y);
-    push_decal_instance(di);
-}
-
-pub fn draw_string_decal(pos: Vf2d, text: &str, col: Pixel,
-                         scale: Vf2d) {
-    //self.draw_decal(pos, &FONT_DECAL, scale, Pixel::WHITE);
-    let mut spos = Vf2d::new(0.0, 0.0);
-    for c in text.chars() {
-        if c == '\n' {
-            spos.x = 0.0;
-            spos.y += 8.0 * scale.y;
-        } else {
-            let ox = (c as u8 - 32) % 16;
-            let oy = (c as u8 - 32) / 16;
-            draw_partial_decal(pos + spos, &FONT_DECAL,
-                                    Vf2d::new(ox as f32 * 8.0, oy as f32 * 8.0),
-                                    Vf2d::new(8.0, 8.0), scale, col);
-            spos.x += 8.0 * scale.x;
+    pub fn get_text_size(&self, s: String) -> Vi2d {
+        let (mut size, mut pos) = (Vi2d::new(0, 1), Vi2d::new(0, 1));
+        for c in s.chars() {
+            if c == '\n' {
+                pos.y += 1;
+                pos.x = 0;
+            } else {
+                pos.x += 1
+            }
+            size.x = std::cmp::max(size.x, pos.x);
+            size.y = std::cmp::max(size.y, pos.y);
         }
+        Vi2d::new(size.x * 8, size.y * 8)
     }
 }
-
-pub fn get_text_size(s: String) -> Vi2d {
-    let (mut size, mut pos) = (Vi2d::new(0, 1), Vi2d::new(0, 1));
-    for c in s.chars() {
-        if c == '\n' {
-            pos.y += 1;
-            pos.x = 0;
-        } else {
-            pos.x += 1
-        }
-        size.x = std::cmp::max(size.x, pos.x);
-        size.y = std::cmp::max(size.y, pos.y);
-    }
-    Vi2d::new(size.x * 8, size.y * 8)
-}
-
 pub trait Olc {
     fn on_engine_start(&mut self) -> bool;
 
-    fn on_engine_update(&mut self, elapsedTime: f32)-> bool;
+    fn on_engine_update(&mut self, engine: &mut OLCEngine, elapsedTime: f32)-> bool;
 
     fn on_engine_destroy(&mut self)-> bool;
 }
@@ -1513,9 +1495,10 @@ pub trait App: Olc {
         pixel_height: u32,
         full_screen: bool,
         vsync: bool,
-    ) -> bool {
+    ) -> Result<OLCEngine, Error> {
         //Set the olc object to be used in this crate
         unsafe {
+
             PLATFORM_DATA.init();
             PLATFORM_DATA.resolution = Some(
                 Vi2d::from(((screen_width / pixel_width) as i32,
@@ -1529,7 +1512,8 @@ pub trait App: Olc {
             PLATFORM_DATA.pixel_size = Some(Vf2d::new(pixel_width as f32,
                                                       pixel_height as f32));
         };
-        OLCEngine::init(
+        let mut engine = OLCEngine::empty();
+        engine.init(
             app_name,
             screen_width,
             screen_height,
@@ -1538,11 +1522,10 @@ pub trait App: Olc {
             full_screen,
             vsync,
         );
-        true
+        Ok(engine)
     }
 
-    fn start(&mut self ) -> Rcode {
-        let local_pge_lock = unsafe{PGE.get_mut().unwrap()};
+    fn start(&mut self, mut engine: OLCEngine ) -> Rcode {
         //Hardcoded to Windows for now. Will change in the future.
         #[cfg(windows)] let mut game_platform = PlatformWindows::new();
 
@@ -1574,8 +1557,8 @@ pub trait App: Olc {
         //PrepareEngine
         let mut renderer = Renderer::new();
         unsafe {
-            renderer.create_graphics(local_pge_lock.full_screen,
-                                     local_pge_lock.vsync,
+            renderer.create_graphics(engine.full_screen,
+                                     engine.vsync,
                                      Vi2d { x: 0, y: 0 },
                                      PLATFORM_DATA.window_size.unwrap_or_default());
             if PLATFORM_DATA.full_screen{
@@ -1585,17 +1568,18 @@ pub trait App: Olc {
                 println!("{}", PLATFORM_DATA.pixel_size.unwrap_or_default());
             }
         }
+        engine.construct_font_sheet();
         //Create Primary Layer "0"
-        let base_layer_id = add_layer();
-        set_draw_target(base_layer_id);
+        let base_layer_id = engine.add_layer();
+        engine.set_draw_target(base_layer_id);
 
 
         let mut frame_timer: f32 = 0.0;
         let mut frame_count: i32 = 0;
         let mut last_fps: i32 = 0;
         let mut game_timer = std::time::SystemTime::now();
-        Renderer::update_texture(get_draw_target_ref().id,
-                                 &get_draw_target_ref().sprite);
+        Renderer::update_texture(engine.get_draw_target_ref().id,
+                                 &engine.get_draw_target_ref().sprite);
 
         //game_engine.construct_font_sheet();
         let mut end_loop = !self.on_engine_start();
@@ -1606,7 +1590,6 @@ pub trait App: Olc {
             let elapsed_time = game_timer.elapsed().unwrap().as_secs_f32();
             game_timer = std::time::SystemTime::now();
 
-            //TODO: CHECK INPUTS
             unsafe {
                 let hw_func = |keys: &mut Vec<HWButton>,
                                keys_old: &mut Vec<bool>,
@@ -1645,7 +1628,7 @@ pub trait App: Olc {
                 PLATFORM_DATA.mouse_wheel_delta = PLATFORM_DATA.mouse_wheel_delta_cache;
                 PLATFORM_DATA.mouse_wheel_delta_cache = 0;
             }
-            if !self.on_engine_update(elapsed_time) {
+            if !self.on_engine_update(&mut engine, elapsed_time) {
                 end_loop = true;
             }
             unsafe {
@@ -1657,34 +1640,36 @@ pub trait App: Olc {
             }
             Renderer::clear_buffer(Pixel::rgba(0, 0, 0, 255), true);
             //always draw the background
-            local_pge_lock.layers[0].update = true;
-            local_pge_lock.layers[0].shown = true;
+            engine.layers[0].update = true;
+            engine.layers[0].shown = true;
             Renderer::prepare_drawing();
 
-            let mut layer_iter = local_pge_lock.layers.iter_mut();
+            let mut layer_iter = engine.layers.iter_mut();
 
             for layer in layer_iter {
                 if layer.shown {
-                    if layer.func_hook.is_none() {
-                        Renderer::apply_texture(layer.id);
-                        if layer.update {
-                            Renderer::update_texture(layer.id,
-                                                     &layer.sprite);
-                            set_layer_update(layer.id, false);
-                        }
-                        Renderer::draw_layer_quad(layer.offset,
-                                                  layer.scale,
-                                                  layer.tint);
-                        if !layer.vec_decal_instance.is_empty() {
-                            let layer_decals = layer.vec_decal_instance.iter_mut();
-                            for decal in layer_decals {
-                                Renderer::draw_decal_quad(decal);
+                    match layer.func_hook {
+                        None => {
+                            Renderer::apply_texture(layer.id);
+                            if layer.update {
+                                Renderer::update_texture(layer.id,
+                                                         &layer.sprite);
+                                layer.update = false;
                             }
-                            layer.vec_decal_instance.clear();
+                            Renderer::draw_layer_quad(layer.offset,
+                                                      layer.scale,
+                                                      layer.tint);
+                            if !layer.vec_decal_instance.is_empty() {
+                                let layer_decals = layer.vec_decal_instance.iter_mut();
+                                for decal in layer_decals {
+                                    Renderer::draw_decal_quad(decal);
+                                }
+                                layer.vec_decal_instance.clear();
+                            }
                         }
-                    } else {
-                        //Run the custom function hook
-                        (layer.func_hook.unwrap())(layer);
+                        Some(function) =>
+                            //Run the custom function hook
+                            function(layer)
                     }
                 }
             }
@@ -1695,7 +1680,8 @@ pub trait App: Olc {
             if frame_timer >= 1.0 {
                 last_fps = frame_count;
                 frame_timer -= 1.0;
-                let sTitle = local_pge_lock.app_name.to_string() + " - FPS: " + &*frame_count.to_string();
+                let sTitle = engine.app_name.to_string() + " - FPS: " + &*frame_count
+                    .to_string();
                 unsafe { game_platform.set_window_title(sTitle) };
                 frame_count = 0;
             }
@@ -2206,7 +2192,13 @@ pub type Vf2d = V2d<f32>;
 #[derive(Clone, Copy)]
 pub union Pixel {
     n: u32,
-    rgba: (u8, u8, u8, u8, )
+    rgba: (u8, u8, u8, u8, ),
+}
+
+impl PartialEq for Pixel{
+    fn eq(&self, other: &Self) -> bool{
+        false
+    }
 }
 
 impl Pixel {
@@ -2342,8 +2334,10 @@ pub struct Decal {
 
 impl Drop for Decal {
     fn drop(&mut self) {
-        let mut id = self.get().id as u32;
-        Renderer::delete_texture(&mut id);
+        let mut id = self.get().id;
+        if id != -1 {
+            Renderer::delete_texture(&mut (id as u32));
+        }
     }
 }
 
@@ -2360,20 +2354,20 @@ impl Decal {
     }
 
     pub fn create(spr: Option<Sprite>) -> Self {
-        if spr.is_none() {
-            Decal::new()
-        } else {
-            let sprite = spr.unwrap();
-            let mut small = SmallD {
-                id: Renderer::create_texture(sprite.width,
-                                             sprite.height) as i32,
-                sprite: sprite,
-                uv_scale: Vf2d::from((1.0, 1.0)),
-            };
-            Decal::update(&mut small);
-            Self{
-                d_inst: Arc::new(small),
+        match spr{
+            Some(sprite) => {
+                let mut small = SmallD {
+                    id: Renderer::create_texture(sprite.width,
+                                                 sprite.height) as i32,
+                    sprite: sprite,
+                    uv_scale: Vf2d::from((1.0, 1.0)),
+                };
+                Decal::update(&mut small);
+                Self{
+                    d_inst: Arc::new(small),
+                }
             }
+            None => Decal::new()
         }
     }
 
@@ -2501,9 +2495,29 @@ impl Pixel {
     /// Creates a new pixel with RGB value.
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
         Self {
-            n: (b as u32) | ((g as u32) << 8) | ((r as u32) << 16) | ((DEFAULT_ALPHA as
+            n: (r as u32) | ((g as u32) << 8) | ((b as u32) << 16) | ((DEFAULT_ALPHA as
                 u32) << 24)
         }
+    }
+
+    pub fn blend_add(colors: &[Pixel]) -> Pixel{
+        let (mut r, mut g, mut b, mut a, mut i):
+            (u8, u8, u8, u8, u8) = (0x00, 0x00, 0x00, 0x00, 0);
+        for p in colors.iter(){
+            if p != &Pixel::BLANK {
+                unsafe {
+                    r += p.rgba.0;
+                    g += p.rgba.1;
+                    b += p.rgba.2;
+                    a += p.rgba.3;
+                }
+                i += 1;
+            }
+        };
+        Pixel::rgba(r / i as u8,
+                    g / colors.len() as u8,
+                    b / colors.len() as u8,
+                    a)
     }
 
     pub fn r(&self) -> u8 {
@@ -2654,12 +2668,10 @@ impl GLLoader {
 
     pub fn get_function_pointer(func_name: &str) -> *const u64 {
         unsafe {
-            let (s_func, s_ogl) = (CString::new(func_name).expect(
-                                           "Failed to get OpenGL function"),
-                                   CString::new("opengl32.dll").expect(
-                                       "Failed loadOpenGL DLL"));
+            let (s_func, s_ogl) =
+                (CString::new(func_name).expect( "Failed to get OpenGL function"),
+               CString::new("opengl32.dll").expect( "Failed to load OpenGL DLL"));
             let mut glp = wglGetProcAddress(s_func.as_ptr());
-
             if glp.is_null() {
                 let module: HMODULE = LoadLibraryA(s_ogl.as_ptr());
                 glp = GetProcAddress(module, s_func.as_ptr());
@@ -2667,6 +2679,7 @@ impl GLLoader {
             if glp.is_null() {
                 println!("FAILED TO LOAD OPENGL FUNCTION: {}", func_name);
             }
+            //println!("{}: {:#X}", func_name, glp as u64);
             glp as *const u64
         }
     }
