@@ -1,19 +1,195 @@
 [package]
 name = "rust_olc_pge"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Jonny Kenyon <granitrocky@gmail.com>"]
 edition = "2018"
-[profile.dev]
-opt-level = 3
 
-[profile.test]
-opt-level = 2
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "rust_olc_pge"
+crate-type = ["rlib"]
 
-[target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3.9", features = ["winuser", "windef","minwindef","dwmapi", "libloaderapi", "ntdef", "wingdi"] }
-widestring = "0.4.2"
-pretty-hex ="0.2.0"
+[target.'cfg(target_arch = "windows")'.dependencies]
 lazy_static = "*"
 bmp = "0.5.0"
 rand = "*"
+
+[dependencies]
+itertools = "0.10"
+image = "0.23"
+blend = "0.6.1"
+bmp = "0.5.0"
+cgmath = "0.17"
+env_logger = "0.7"
+log = "0.4"
+wgpu = { version = "0.9" , features = ["webgl"] }
+futures = "0.3"
+num-traits = "0.2.14"
+pretty-hex ="0.2.0"
+lazy_static = "*"
+winit = { version = "0.25.0" }
+inline-spirv = "0.1.2"
+bytemuck = { version = "1.4", features = [ "derive" ] }
+gltf = { version = "0.16.0", features = ["import"] }
+bitflags = "1.2.1"
+
+[target.'cfg(target_arch="wasm32")'.dependencies]
+wasm-bindgen = "0.2.74"
+wasm-bindgen-futures = "*"
+winit = { version = "0.25.0",  features = ["web-sys"] }
+console_log = "0.1.2"
+instant = "0.1.9"
+console_error_panic_hook = "*"
+js-sys  = "*"
+
+[target.'cfg(target_arch="wasm32")'.dev-dependencies]
+console_error_panic_hook = "0.1.6"
+console_log = "0.1.2"
+
+[features]
+js = []
+
+[target.'cfg(target_arch="wasm32")'.dependencies.web-sys]
+version = "^0.3.50"
+optional = false
+features = [
+         "console",
+         "WebGlBuffer",
+         "WebGlRenderingContext",
+         "WebGl2RenderingContext",
+         "WebGlProgram",
+         "WebGlSampler",
+         "WebGlTexture",
+         "WebGlProgram",
+         "WebGlShader",
+         "Document",
+         "Navigator",
+         "Node",
+         "NodeList",
+         "Gpu",
+         "GpuAdapter",
+         "GpuAdapterFeatures",
+         "GpuAdapterLimits",
+         "GpuAddressMode",
+         "GpuBindGroup",
+         "GpuBindGroupDescriptor",
+         "GpuBindGroupEntry",
+         "GpuBindGroupLayout",
+         "GpuBindGroupLayoutDescriptor",
+         "GpuBindGroupLayoutEntry",
+         "GpuBlendComponent",
+         "GpuBlendFactor",
+         "GpuBlendOperation",
+         "GpuBlendState",
+         "GpuBuffer",
+         "GpuBufferBinding",
+         "GpuBufferBindingLayout",
+         "GpuBufferBindingType",
+         "GpuBufferDescriptor",
+         "GpuBufferUsage",
+         "GpuCanvasContext",
+         "GpuColorDict",
+         "GpuColorTargetState",
+         "GpuColorWrite",
+         "GpuCommandBuffer",
+         "GpuCommandBufferDescriptor",
+         "GpuCommandEncoder",
+         "GpuCommandEncoderDescriptor",
+         "GpuCompareFunction",
+         "GpuCompilationInfo",
+         "GpuCompilationMessage",
+         "GpuCompilationMessageType",
+         "GpuComputePassDescriptor",
+         "GpuComputePassEncoder",
+         "GpuComputePipeline",
+         "GpuComputePipelineDescriptor",
+         "GpuCullMode",
+         "GpuDepthStencilState",
+         "GpuDevice",
+         "GpuDeviceDescriptor",
+         "GpuDeviceLostInfo",
+         "GpuDeviceLostReason",
+         "GpuErrorFilter",
+         "GpuExtent3dDict",
+         "GpuFeatureName",
+         "GpuFilterMode",
+         "GpuFragmentState",
+         "GpuFrontFace",
+         "GpuImageCopyBuffer",
+         "GpuImageCopyImageBitmap",
+         "GpuImageCopyTexture",
+         "GpuImageDataLayout",
+         "GpuIndexFormat",
+         "GpuInputStepMode",
+         "GpuLoadOp",
+         "GpuMapMode",
+         "GpuMultisampleState",
+         "GpuObjectDescriptorBase",
+         "GpuOrigin2dDict",
+         "GpuOrigin3dDict",
+         "GpuOutOfMemoryError",
+         "GpuPipelineDescriptorBase",
+         "GpuPipelineLayout",
+         "GpuPipelineLayoutDescriptor",
+         "GpuPipelineStatisticName",
+         "GpuPowerPreference",
+         "GpuPrimitiveState",
+         "GpuPrimitiveTopology",
+         "GpuProgrammableStage",
+         "GpuQuerySet",
+         "GpuQuerySetDescriptor",
+         "GpuQueryType",
+         "GpuQueue",
+         "GpuRenderBundle",
+         "GpuRenderBundleDescriptor",
+         "GpuRenderBundleEncoder",
+         "GpuRenderBundleEncoderDescriptor",
+         "GpuRenderPassColorAttachment",
+         "GpuRenderPassDepthStencilAttachment",
+         "GpuRenderPassDescriptor",
+         "GpuRenderPassEncoder",
+         "GpuRenderPipeline",
+         "GpuRenderPipelineDescriptor",
+         "GpuRequestAdapterOptions",
+         "GpuSampler",
+         "GpuSamplerBindingLayout",
+         "GpuSamplerBindingType",
+         "GpuSamplerDescriptor",
+         "GpuShaderModule",
+         "GpuShaderModuleDescriptor",
+         "GpuShaderStage",
+         "GpuStencilFaceState",
+         "GpuStencilOperation",
+         "GpuStorageTextureAccess",
+         "GpuStorageTextureBindingLayout",
+         "GpuStoreOp",
+         "GpuSwapChain",
+         "GpuSwapChainDescriptor",
+         "GpuTexture",
+         "GpuTextureAspect",
+         "GpuTextureBindingLayout",
+         "GpuTextureDescriptor",
+         "GpuTextureDimension",
+         "GpuTextureFormat",
+         "GpuTextureSampleType",
+         "GpuTextureUsage",
+         "GpuTextureView",
+         "GpuTextureViewDescriptor",
+         "GpuTextureViewDimension",
+         "GpuUncapturedErrorEvent",
+         "GpuUncapturedErrorEventInit",
+         "GpuValidationError",
+         "GpuVertexAttribute",
+         "GpuVertexBufferLayout",
+         "GpuVertexFormat",
+         "GpuVertexState",
+         "HtmlCanvasElement",
+         "Window",
+         "Element",
+         "FileReader",
+         "Headers",
+         "Request",
+         "RequestInit",
+         "RequestMode",
+         "Response",
+         "ReadableStream",
+         ]

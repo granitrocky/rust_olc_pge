@@ -1,0 +1,11 @@
+/target
+/.idea/
+/.idea/codeStyles/
+/.idea/misc.xml
+/.idea/modules.xml
+/.idea/vcs.xml
+/.idea/workspace.xml
+/olc_3d_engine.iml
+/Cargo.lock
+/main.rs
+#*
